@@ -17,7 +17,7 @@ Web app (PWA later) for recording live poker hands. Prototype on desktop first, 
 - [x] Brand theme: purple #B15BF1 → cyan #54E2EF (from vlog-editor config/brand).
 - [x] Offline install: manifest.webmanifest, sw.js (network-first cache), brand icons in icons/, iOS meta + safe-area padding.
 - [x] Backup / Restore on home page (merge by session id, never deletes).
-- [ ] Hosting: GitHub repo `hand-recorder` + Cloudflare Pages connected to it (waiting on Ben: GitHub username + empty repo, Cloudflare account)
+- [x] Hosting: GitHub Pages from public repo MultiClown/hand-recorder (main, root) → https://multiclown.github.io/hand-recorder/ . Push to main = live in ~1 min. Move to Cloudflare Pages later if sync/sharing is needed.
 
 ## Phase 2 (after feedback)
 - Iterate on the flow based on desktop testing
