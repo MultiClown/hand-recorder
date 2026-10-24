@@ -955,6 +955,18 @@ root.addEventListener('input', (e) => {
   if (key === 'name') { h.seats[seat].name = v; save(); }
 });
 
+// Tapping a blind on the home card means the level is changing: start from an empty
+// field, and put the old value back if nothing was typed.
+root.addEventListener('focusin', (e) => {
+  if (!['t-sb', 't-bb'].includes(e.target.dataset.input)) return;
+  e.target.dataset.prev = e.target.value;
+  e.target.value = '';
+});
+root.addEventListener('focusout', (e) => {
+  if (!['t-sb', 't-bb'].includes(e.target.dataset.input)) return;
+  if (e.target.value.trim() === '') e.target.value = e.target.dataset.prev || '';
+});
+
 // Redraw the table once a stack or name field is done being edited.
 root.addEventListener('change', (e) => {
   // Blinds show in the standard format (1,500 or 1.5K) once typing is done.
