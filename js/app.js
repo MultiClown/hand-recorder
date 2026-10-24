@@ -957,6 +957,13 @@ root.addEventListener('input', (e) => {
 
 // Redraw the table once a stack or name field is done being edited.
 root.addEventListener('change', (e) => {
+  // Blinds show in the standard format (1,500 or 1.5K) once typing is done.
+  const key = e.target.dataset.input;
+  if (['sb', 'bb', 't-sb', 't-bb'].includes(key)) {
+    const n = parseAmount(e.target.value);
+    if (n != null) e.target.value = F(n);
+    return;
+  }
   if (e.target.id === 'restore-file') {
     const f = e.target.files[0];
     e.target.value = '';
