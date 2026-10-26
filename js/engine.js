@@ -117,6 +117,8 @@ export function replay(hand) {
   const stackOf = (s) => known(s) ?? known(HERO) ?? Infinity;
   const remaining = (s) => stackOf(s) - st.total[s] - st.anteBy[s];
   st.remaining = remaining;
+  st.stackOf = stackOf;
+  st.known = known;
   const put = (s, amt) => {
     const a = Math.max(0, Math.min(amt, remaining(s)));
     st.contrib[s] += a;
@@ -206,9 +208,14 @@ export function replay(hand) {
     }
     st.needToAct.delete(s);
     st.lastActor = s;
+    const allin = added > 0 && st.allin.has(s);
     st.log.push({
       idx, street: st.street, kind: 'act', seat: s, a,
-      to: st.contrib[s], added, allin: added > 0 && st.allin.has(s),
+      to: st.contrib[s], added, allin,
+      // Effective stack: the most this all-in can actually be called for.
+      eff: allin ? effectiveStack(st, occ, s) : null,
+      // Chips left behind after the action, when the stack was actually entered.
+      behind: added > 0 && known(s) != null ? Math.max(0, remaining(s)) : null,
     });
     settle();
   });
@@ -228,7 +235,22 @@ function finish(st, occ) {
     st.phase = 'needboard';
     st.missingStreet = st.street + 1;
   }
+  // Once the hand is over, a bet nobody matched goes back to whoever made it,
+  // so the pot is what the winner actually takes.
+  if (st.phase === 'done' || st.phase === 'showdown') {
+    const totals = occ.map((s) => [s, st.total[s]]).sort((x, y) => y[1] - x[1]);
+    const excess = totals.length > 1 ? totals[0][1] - totals[1][1] : 0;
+    if (excess > 0) {
+      st.uncalled = { seat: totals[0][0], amount: excess };
+      st.pot -= excess;
+    }
+  }
   return st;
+}
+
+function effectiveStack(st, occ, s) {
+  const others = occ.filter((p) => p !== s && !st.folded.has(p)).map((p) => st.stackOf(p));
+  return others.length ? Math.min(st.stackOf(s), Math.max(...others)) : st.stackOf(s);
 }
 
 function nextIn(set, from, occ) {
@@ -303,9 +325,14 @@ export function handName(hole, board) {
 }
 
 export function autoWinners(hand, st) {
-  if (st.phase !== 'showdown' || st.board.length < 5) return [];
+  if (st.phase !== 'showdown') return [];
+  // Players marked mucked are out; if only one player is left, they win.
+  const mucked = new Set(hand.mucked || []);
+  const live = st.active.filter((s) => !mucked.has(s));
+  if (live.length === 1) return live;
+  if (st.board.length < 5) return [];
   // Only known cards are recorded, so a player with no cards folded or mucked.
-  const ranked = st.active.map((s) => {
+  const ranked = live.map((s) => {
     const h = hand.holes?.[s];
     return h?.[0] && h?.[1] ? [s, best([...h, ...st.board])] : null;
   }).filter(Boolean);
@@ -326,7 +353,8 @@ export function results(hand, st = replay(hand)) {
   const net = {};
   Object.keys(st.total).forEach((k) => {
     const s = Number(k);
-    net[s] = (winners.includes(s) ? share : 0) - st.total[s] - st.anteBy[s];
+    net[s] = (winners.includes(s) ? share : 0) - st.total[s] - st.anteBy[s]
+      + (st.uncalled?.seat === s ? st.uncalled.amount : 0);
   });
   return { winners, share, net };
 }
@@ -374,7 +402,10 @@ export function seatLabel(hand, st, seat) {
 const VERB = { fold: 'folds', check: 'checks', call: 'calls', bet: 'bets', raise: 'raises to' };
 
 export function actionText(e, full) {
-  if (e.allin) return e.a === 'call' ? `calls all-in ${fmt(e.added, full)}` : `all-in ${fmt(e.to, full)}`;
+  if (e.allin) {
+    const eff = e.eff != null && e.eff < e.to ? ` (eff. ${fmt(e.eff, full)})` : '';
+    return e.a === 'call' ? `calls all-in ${fmt(e.added, full)}${eff}` : `all-in ${fmt(e.to, full)}${eff}`;
+  }
   if (e.a === 'bet' || e.a === 'raise') return `${VERB[e.a]} ${fmt(e.to, full)}`;
   if (e.a === 'call') return `calls ${fmt(e.added, full)}`;
   return VERB[e.a];
@@ -462,7 +493,8 @@ export function handToText(hand, full = false) {
     for (const s of st.active) {
       const h = holeText(hand.holes?.[s]);
       const name = handName(hand.holes?.[s], st.board);
-      lines.push(`  ${L(s)} ${h ? `shows ${h}${name ? ` (${name})` : ''}` : 'mucks'}`);
+      const mucked = (hand.mucked || []).includes(s);
+      lines.push(`  ${L(s)} ${h && !mucked ? `shows ${h}${name ? ` (${name})` : ''}` : 'mucks'}`);
     }
   }
   // Cards known for players who folded (e.g. shown after the hand).
