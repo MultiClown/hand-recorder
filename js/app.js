@@ -30,6 +30,7 @@ function newSession() {
     id: uid(), createdAt: Date.now(), type: 'tournament',
     game: prev ? { ...prev.game } : { sb: 1000, bb: 2000, ante: 2000, anteType: 'bb' },
     maxSeats: prev?.maxSeats || 9,
+    heroSeat: null, seatNotes: {}, tableNo: 1, bullets: 1,
     hands: [],
   };
   db.sessions.push(s);
@@ -39,10 +40,15 @@ function newSession() {
 
 const blankSeat = (i) => ({ state: i === HERO ? 'in' : 'out', name: '', stack: null });
 
+// Real seat number (1..n) of a seat index, counting clockwise from hero's seat.
+const absSeat = (heroSeat, i, n) => ((heroSeat - 1 + i) % n) + 1;
+
 function newHand(session) {
   const prev = session.hands.at(-1);
+  const n = session.maxSeats;
   let seats;
-  if (prev && prev.seats.length === session.maxSeats) {
+  // Away players carry over only while hero stays at the same table.
+  if (prev && prev.seats.length === n && (prev.tableNo || 1) === (session.tableNo || 1)) {
     const st = replay(prev);
     seats = prev.seats.map((s, i) => ({
       state: i === HERO ? 'in' : s.state === 'away' ? 'away' : 'out',
@@ -54,7 +60,10 @@ function newHand(session) {
     seats = Array.from({ length: session.maxSeats }, (_, i) => blankSeat(i));
   }
   if (session.myStack != null) seats[HERO].stack = session.myStack;
+  // Seat notes belong to the table, by real seat number, so they follow the players.
+  if (session.heroSeat) seats.forEach((st, i) => { st.name = session.seatNotes?.[absSeat(session.heroSeat, i, n)] || ''; });
   const hand = {
+    heroSeat: session.heroSeat || null, tableNo: session.tableNo || 1,
     tourney: tourneySnapshot(session),
     id: uid(), num: session.hands.length + 1, createdAt: Date.now(),
     game: { ...session.game, anteType: 'bb', ante: session.game.bb }, seats, button: 0, heroPos: null, stage: 'setup',
@@ -167,17 +176,19 @@ function handSummary(h) {
 
 function homeView() {
   const s = session();
-  const dateOf = (x) => new Date(x.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const dateOf = (x) => new Date(playedAt(x)).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const past = db.sessions.filter((x) => x.id !== s.id).reverse();
   return `<div class="home">
     <div class="row between"><h1>Hand Recorder</h1>
       <button class="btn-ghost" data-act="units">${db.settings.fullNumbers ? '1,000' : '1K'}</button></div>
-    ${swipe('session', s.id, tourneyCard(s, dateOf(s)))}
+    ${tourneyCard(s, dateOf(s))}
     <button class="big" data-act="new-hand">+ New hand</button>
     ${s.hands.slice().reverse().map((h) => swipe('hand', h.id, handSummary(h))).join('')}
     ${s.hands.length ? `<div class="row"><button class="secondary" style="flex:1" data-act="export-editor">Export for vlog editor</button>
       <button class="secondary" style="flex:1" data-act="copy-all">Copy all as text</button></div>
       <div class="hint">Swipe a hand or session left to delete it.</div>` : ''}
+    ${detailsCard(s)}
+    ${tableCard(s)}
     ${past.length ? `<div class="muted" style="margin-top:8px">Past sessions</div>
       ${past.map((p) => swipe('session', p.id, `<button class="hand-item" data-act="session" data-id="${p.id}">
         <span>${esc(p.name || 'Tournament')} · ${dateOf(p)}</span>
@@ -186,7 +197,54 @@ function homeView() {
     <div class="row"><button class="secondary" style="flex:1" data-act="backup">Back up all</button>
       <button class="secondary" style="flex:1" data-act="restore">Restore</button></div>
     <input type="file" id="restore-file" accept=".json,application/json" hidden>
+  </div>
+  ${ui.sheet ? homeSheet(s) : ''}`;
+}
+
+// A tournament is dated by when its first hand was played, not when it was set up.
+const playedAt = (s) => (s.hands[0] ? s.hands[0].createdAt : s.createdAt);
+
+const NEEDED = [['name', 'name'], ['buyin', 'buy-in'], ['gtd', 'GTD'], ['entries', 'entries'], ['itm', 'ITM places']];
+
+function tableCard(s) {
+  const n = s.maxSeats || 9;
+  let seats = '';
+  for (let k = 1; k <= n; k++) {
+    const a = ((-90 + ((k - 0.5) * 360) / n) * Math.PI) / 180;
+    const note = s.seatNotes?.[k] || '';
+    seats += `<button class="tseat ${s.heroSeat === k ? 'me' : ''}" data-act="seat-note" data-k="${k}"
+      style="left:${50 + 42 * Math.cos(a)}%;top:${50 + 38 * Math.sin(a)}%"><b>${s.heroSeat === k ? 'ME' : k}</b>${note ? `<span>${esc(note)}</span>` : ''}</button>`;
+  }
+  return `<div class="card ttable">
+    <div class="row between"><span class="label">Table${(s.tableNo || 1) > 1 ? ` #${s.tableNo}` : ''}</span>
+      <div class="seg" style="flex:none">${[6, 8, 9, 10].map((m) => `<button class="${n === m ? 'on' : ''}" data-act="t-size" data-n="${m}">${m}-max</button>`).join('')}</div></div>
+    <div class="mini-table"><div class="felt"></div><span class="dealer-spot">Dealer</span>${seats}</div>
+    <div class="hint">${s.heroSeat ? 'Tap a seat to note who sits there.' : 'Tap your seat, then "This is my seat".'}</div>
+    <div class="row"><div class="seg" style="flex:1">
+        <button class="${db.settings.realTable !== false ? 'on' : ''}" data-act="view" data-v="real">Real table</button>
+        <button class="${db.settings.realTable === false ? 'on' : ''}" data-act="view" data-v="hero">Me at bottom</button></div>
+      <button class="secondary" data-act="new-table">${ui.confirmNewTable ? 'Tap again' : 'Moved tables'}</button></div>
   </div>`;
+}
+
+function homeSheet(s) {
+  const sh = ui.sheet;
+  if (sh.type === 'seatnote') {
+    return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <h3>Seat ${sh.k}</h3>
+      ${s.heroSeat === sh.k ? '<div class="muted">Your seat</div>' : `<button class="secondary" data-act="my-seat" data-k="${sh.k}">This is my seat</button>`}
+      <label class="muted">Note about the player here</label>
+      <input data-input="seat-note" data-k="${sh.k}" placeholder="e.g. hat guy, aggro reg" value="${esc(s.seatNotes?.[sh.k] || '')}">
+      <button class="primary" data-act="close-sheet">Done</button></div></div>`;
+  }
+  if (sh.type === 'exportwarn') {
+    return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <h3>Missing tournament details</h3>
+      <div>Still empty: <b>${sh.missing.join(', ')}</b>.</div>
+      <div class="row"><button class="secondary" style="flex:1" data-act="close-sheet">Fill them in</button>
+        <button class="primary" style="flex:1" data-act="export-anyway">Export anyway</button></div></div></div>`;
+  }
+  return '';
 }
 
 // ---------- Backup / restore (everything in the app, as one file) ----------
@@ -226,27 +284,53 @@ async function restore(file) {
 
 // The live tournament: details, field size, and the blinds/stack that new hands start from.
 function tourneyCard(s, when) {
-  const f = (key, label, ph, mode = 'text') => `<label class="tf"><span>${label}</span>
-    <input data-input="t-${key}" inputmode="${mode}" placeholder="${ph}" value="${esc(s[key] ?? '')}"></label>`;
+  // Fields the vlog needs are outlined until filled in.
+  const f = (...a) => tField(s, ...a);
   return `<div class="card tcard">
-    <div class="row between"><input class="tname" data-input="t-name" placeholder="Tournament name" value="${esc(s.name || '')}">
+    <div class="row between"><input class="tname need ${s.name ? '' : 'missing'}" data-input="t-name" placeholder="Tournament name" value="${esc(s.name || '')}">
       <button class="btn-ghost" data-act="new-session">New</button></div>
     <div class="muted">${when} · ${s.hands.length} hands</div>
-    <div class="tgrid3">${f('buyin', 'Buy-in', '$1,600')}${f('gtd', 'GTD', '$1M')}${f('bullets', 'My bullets', '1', 'numeric')}</div>
-    <div class="tgrid3">${f('entries', 'Entries', '350', 'numeric')}${f('left', 'Players left', '87', 'numeric')}<span></span></div>
     <div class="tgrid3">
       <label class="tf"><span>SB</span><input data-input="t-sb" inputmode="decimal" value="${F(s.game.sb)}"></label>
       <label class="tf"><span>BB <span class="muted">+ BB ante</span></span><input data-input="t-bb" inputmode="decimal" value="${F(s.game.bb)}"></label>
       <label class="tf"><span>My stack</span><input data-input="t-stack" inputmode="decimal" placeholder="in ${STACK_UNITS.find(([u]) => u === (s.stackUnit || 1e3))[1]}" value="${s.myStack != null ? +(s.myStack / (s.stackUnit || 1e3)).toFixed(2) : ''}"></label>
     </div>
+    <div class="tgrid3">${f('left', 'Players left', '44', 'numeric')}<span></span><span></span></div>
     <div class="hint" id="t-eq">${s.myStack != null ? `My stack = ${F(s.myStack)} (${(s.myStack / s.game.bb).toFixed(1)} BB)` : 'New hands start with these blinds and your stack.'}</div>
+    ${missingNote(s)}
+  </div>`;
+}
+
+const tField = (s, key, label, ph, mode = 'text', need = false) => `<label class="tf ${need ? 'need' : ''} ${need && !s[key] ? 'missing' : ''}"><span>${label}</span>
+    <input data-input="t-${key}" inputmode="${mode}" placeholder="${ph}" value="${esc(s[key] ?? '')}"></label>`;
+
+function missingNote(s) {
+  const missing = NEEDED.filter(([k]) => !String(s[k] ?? '').trim()).map(([, l]) => l);
+  return missing.length ? `<div class="hint need-note">Still to fill in below: ${missing.join(', ')}</div>` : '';
+}
+
+// Tournament details and my result: filled in once, or at the end.
+function detailsCard(s) {
+  const f = (...a) => tField(s, ...a);
+  const time = (key, label) => `<div class="tf"><span>${label} <button class="now" data-act="time-now" data-k="${key}">now</button></span>
+    <input type="time" data-input="t-${key}" value="${esc(s[key] || '')}"></div>`;
+  return `<div class="card tcard">
+    <div class="label">Tournament details</div>
+    <div class="tgrid3">${f('buyin', 'Buy-in', '$400', 'text', true)}${f('gtd', 'GTD', '$500K', 'text', true)}${f('itm', 'ITM places', '60', 'numeric', true)}</div>
+    <div class="tgrid3">${f('entries', 'Entries', '212', 'numeric', true)}<span></span><span></span></div>
+    <div class="label">My result</div>
+    <div class="tgrid3">
+      <div class="tf"><span>Bullets</span><div class="stepper"><button data-act="bullets" data-d="-1">−</button><b>${Number(s.bullets) || 1}</b><button data-act="bullets" data-d="1">+</button></div></div>
+      ${f('finish', 'Finish place', '—', 'numeric')}${f('cashout', 'Cash-out', '$0')}</div>
+    <div class="tgrid3">${time('start', 'Start')}${time('bust', 'Bust')}<span></span></div>
+    <button class="danger small" data-act="delete-session">${ui.confirmDeleteSession ? 'Tap again to delete this tournament' : 'Delete tournament'}</button>
   </div>`;
 }
 
 // What the tournament looked like when the hand was played, for the hand text.
 function tourneySnapshot(s) {
   const t = {};
-  ['name', 'buyin', 'gtd', 'entries', 'left', 'bullets'].forEach((k) => { if (s[k]) t[k] = s[k]; });
+  ['name', 'buyin', 'gtd', 'entries', 'left', 'itm', 'bullets'].forEach((k) => { if (s[k]) t[k] = s[k]; });
   return t;
 }
 
@@ -366,7 +450,7 @@ function editorHand(h) {
       showdown: st.phase === 'showdown',
       pot: st.pot,
     },
-    field: { entries: num(t.entries), left: num(t.left), bullets: num(t.bullets) },
+    field: { entries: num(t.entries), left: num(t.left), itm: num(t.itm), bullets: num(t.bullets) },
     flags: h.done ? [] : ['not finished in the app'],
     event: eventParts(t, (b) => b, (g) => `${g} GTD`).join(' · '),
   };
@@ -374,10 +458,27 @@ function editorHand(h) {
 
 function exportForEditor() {
   const s = session();
-  const day = new Date(s.createdAt).toLocaleDateString('en-CA');
+  const missing = NEEDED.filter(([k]) => !String(s[k] ?? '').trim()).map(([, l]) => l);
+  if (missing.length && !ui.exportAnyway) { ui.sheet = { type: 'exportwarn', missing }; return render(); }
+  ui.exportAnyway = false;
+  const day = new Date(playedAt(s)).toLocaleDateString('en-CA');
+  // Times are local; a bust earlier than the start is taken as after midnight.
+  const when = (t, after) => {
+    if (!t) return null;
+    const d = new Date(`${day}T${t}`);
+    if (after && t < after) d.setDate(d.getDate() + 1);
+    return `${d.toLocaleDateString('en-CA')}T${t}`;
+  };
   const data = {
     _source: `Hand Recorder app export (${new Date().toISOString().slice(0, 16).replace('T', ' ')})`,
-    tournament: { name: s.name || '', buyin: s.buyin || '', gtd: s.gtd || '', date: day },
+    tournament: {
+      name: s.name || '', buyin: s.buyin || '', gtd: s.gtd || '', date: day,
+      entries: num(s.entries), itm: num(s.itm), players_left: num(s.left),
+      result: {
+        bullets: Number(s.bullets) || 1, finish: num(s.finish), cashout: s.cashout || null,
+        start: when(s.start), bust: when(s.bust, s.start),
+      },
+    },
     hands: s.hands.map(editorHand),
   };
   const json = JSON.stringify(data, null, 1);
@@ -391,8 +492,15 @@ function exportForEditor() {
   copy(json);
 }
 
-const SEAT_POS = (i, n, rx, ry, rot = 0) => {
-  const a = ((90 + (i * 360) / n + rot) * Math.PI) / 180;
+// Real-table view puts each seat where it actually is (dealer at the top, seat 1 on
+// the dealer's left, counting clockwise); otherwise hero sits at the bottom.
+function seatAngle(h, i) {
+  const n = h.seats.length;
+  if (h.heroSeat && db.settings.realTable !== false) return -90 + ((absSeat(h.heroSeat, i, n) - 0.5) * 360) / n;
+  return 90 + (i * 360) / n;
+}
+const SEAT_POS = (h, i, rx, ry, rot = 0) => {
+  const a = ((seatAngle(h, i) + rot) * Math.PI) / 180;
   return { x: 50 + rx * Math.cos(a), y: 50 + ry * Math.sin(a) };
 };
 
@@ -404,7 +512,7 @@ function tableView(h, st) {
   html += `<div class="center"><div>${board.map((c) => mc(c, 'lg')).join('')}</div>
     ${stage === 'play' ? `<div class="pot">Pot ${F(st.pot)}</div>` : ''}</div>`;
   h.seats.forEach((seat, i) => {
-    const p = SEAT_POS(i, n, 43, 41);
+    const p = SEAT_POS(h, i, 43, 41);
     const cls = ['seat', `st-${seat.state}`];
     if (i === HERO) cls.push('hero');
     if (stage === 'play' && st.folded.has(i)) cls.push('folded');
@@ -423,15 +531,16 @@ function tableView(h, st) {
     html += `<div class="${cls.join(' ')}" data-act="seat" data-seat="${i}" style="left:${p.x}%;top:${p.y}%">
       <div class="p">${label}</div>
       ${sub ? `<div class="s">${sub}</div>` : ''}
-      ${seat.name && i !== HERO && seat.state === 'in' ? `<div class="n">${esc(seat.name)}</div>` : ''}
+      ${seat.name && i !== HERO && seat.state !== 'away' && (stage !== 'play' || seat.state === 'in') ? `<div class="n">${esc(seat.name)}</div>` : ''}
+      ${h.heroSeat ? `<span class="sn">${absSeat(h.heroSeat, i, n)}</span>` : ''}
       ${cards ? `<div class="mini">${cards}</div>` : ''}</div>`;
     if (stage === 'play' && st.contrib[i] > 0) {
-      const b = SEAT_POS(i, n, 25, 21);
+      const b = SEAT_POS(h, i, 25, 21);
       html += `<div class="betchip" style="left:${b.x}%;top:${b.y}%">${F(st.contrib[i])}</div>`;
     }
   });
   if (h.heroPos) {
-    const d = SEAT_POS(effectiveButton(h), n, 31, 27, 14);
+    const d = SEAT_POS(h, effectiveButton(h), 31, 27, 14);
     html += `<div class="dealer" style="left:${d.x}%;top:${d.y}%">D</div>`;
   }
   return html + '</div>';
@@ -497,11 +606,10 @@ function setupPanel(h, st) {
   const choices = positionChoices(count);
   return `<div class="blinds-row"><label>SB</label><input data-input="sb" inputmode="decimal" value="${F(g.sb)}">
       <label>BB</label><input data-input="bb" inputmode="decimal" value="${F(g.bb)}"><span class="muted">+ BB ante</span></div>
-    <div class="row between"><span class="label">Table</span>
-      <div class="seg" style="flex:none">${[6, 8, 9, 10].map((n) => `<button class="${h.seats.length === n ? 'on' : ''}" data-act="table" data-n="${n}">${n}-max</button>`).join('')}</div></div>
     <div class="label">Hero's position <span class="muted">(${count} players dealt)</span></div>
     <div class="chips poschips" style="--n:${choices.length}">${choices.map((p) => `<button class="${h.heroPos === p ? 'on' : ''}" data-act="hero-pos" data-p="${p}">${p}</button>`).join('')}</div>
-    <div class="hint">Tap players on the table: not in hand → in hand → away. Stacks come at the end.</div>
+    <div class="row between"><span class="hint">${ui.noteMode ? 'Tap a seat to write a note about that player.' : 'Tap players: not in hand → in hand → away.'}</span>
+      <button class="btn-ghost" data-act="note-mode">${ui.noteMode ? 'Done' : 'Seat notes'}</button></div>
     <button class="primary" data-act="goto" data-stage="cards" ${h.heroPos ? '' : 'disabled'}>${h.heroPos ? 'Cards →' : 'Pick hero\'s position'}</button>`;
 }
 
@@ -626,6 +734,14 @@ function endPanel(h, st) {
 
 function sheetView(h, st) {
   const sh = ui.sheet;
+  if (sh.type === 'seatnote') {
+    const real = h.heroSeat ? ` · seat ${absSeat(h.heroSeat, sh.seat, h.seats.length)}` : '';
+    return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <h3>${h.heroPos ? posName(h, st, sh.seat) : 'Seat'}${real}</h3>
+      <label class="muted">Note about the player here</label>
+      <input data-input="name" data-seat="${sh.seat}" placeholder="e.g. hat guy, aggro reg" value="${esc(h.seats[sh.seat].name)}">
+      <button class="primary" data-act="close-sheet">Done</button></div></div>`;
+  }
   const ev = h.events[sh.idx];
   const kinds = ['fold', 'check', 'call', 'raise', 'allin'];
   return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
@@ -694,6 +810,7 @@ function pickCard(c) {
 function seatTap(i) {
   const h = hand();
   if (h.stage === 'setup') {
+    if (ui.noteMode) { if (i !== HERO) { ui.sheet = { type: 'seatnote', seat: i }; render(); } return; }
     if (i === HERO) return;
     const order = ['out', 'in', 'away'];
     const seat = h.seats[i];
@@ -725,19 +842,11 @@ function seatTap(i) {
   render();
 }
 
-function resizeTable(h, n) {
-  const seats = Array.from({ length: n }, (_, i) => h.seats[i] || blankSeat(i));
-  h.seats = seats;
-  Object.keys(h.holes).forEach((k) => { if (Number(k) >= n) delete h.holes[k]; });
-  session().maxSeats = n;
-  placeButton(h);
-}
-
 const handlers = {
-  home() { ui.view = 'home'; ui.stackEdit = false; ui.raise = null; ui.sheet = null; ui.slot = null; ui.confirmDelete = false; render(); },
+  home() { ui.view = 'home'; ui.noteMode = false; ui.stackEdit = false; ui.raise = null; ui.sheet = null; ui.slot = null; ui.confirmDelete = false; render(); },
   units() { db.settings.fullNumbers = !db.settings.fullNumbers; save(); render(); },
-  'new-session'() { ui.sessionId = newSession().id; toast('New session started'); },
-  session(el) { ui.sessionId = el.dataset.id; render(); },
+  'new-session'() { ui.sessionId = newSession().id; toast('New tournament started'); toTop(); },
+  session(el) { ui.sessionId = el.dataset.id; render(); toTop(); },
   'new-hand'() { const h = newHand(session()); ui.handId = h.id; ui.view = 'hand'; render(); },
   open(el) { ui.handId = el.dataset.id; ui.view = hand().done ? 'review' : 'hand'; render(); },
   'copy-all'() { copy(session().hands.map((h) => handToText(h, db.settings.fullNumbers)).join('\n\n---\n\n')); },
@@ -762,7 +871,31 @@ const handlers = {
     session().game = { ...g };
     save(); render();
   },
-  table(el) { resizeTable(hand(), Number(el.dataset.n)); save(); render(); },
+  'note-mode'() { ui.noteMode = !ui.noteMode; render(); },
+  't-size'(el) { const s = session(); s.maxSeats = Number(el.dataset.n); if (s.heroSeat > s.maxSeats) s.heroSeat = null; save(); render(); },
+  'seat-note'(el) { ui.sheet = { type: 'seatnote', k: Number(el.dataset.k) }; render(); },
+  'my-seat'(el) { session().heroSeat = Number(el.dataset.k); save(); render(); },
+  view(el) { db.settings.realTable = el.dataset.v === 'real'; save(); render(); },
+  'new-table'() {
+    if (!ui.confirmNewTable) { ui.confirmNewTable = true; return render(); }
+    const s = session();
+    s.tableNo = (s.tableNo || 1) + 1;
+    s.seatNotes = {};
+    s.heroSeat = null;
+    ui.confirmNewTable = false;
+    save();
+    toast('New table: tap your seat');
+  },
+  bullets(el) { const s = session(); s.bullets = Math.max(1, (Number(s.bullets) || 1) + Number(el.dataset.d)); save(); render(); },
+  'time-now'(el) { session()[el.dataset.k] = new Date().toTimeString().slice(0, 5); save(); render(); },
+  'delete-session'() {
+    if (!ui.confirmDeleteSession) { ui.confirmDeleteSession = true; return render(); }
+    const id = session().id;
+    db.sessions = db.sessions.filter((x) => x.id !== id);
+    ui.sessionId = null; ui.confirmDeleteSession = false;
+    save(); toast('Tournament deleted');
+  },
+  'export-anyway'() { ui.sheet = null; ui.exportAnyway = true; exportForEditor(); },
   'stacks-edit'() { ui.stackEdit = !ui.stackEdit; ui.raise = null; render(); },
   'stack-unit'(el) { session().stackUnit = Number(el.dataset.u); save(); render(); },
   'hero-pos'(el) { const h = hand(); h.heroPos = el.dataset.p; placeButton(h); save(); render(); },
@@ -865,18 +998,25 @@ root.addEventListener('pointerdown', (e) => {
   const key = wrap.dataset.kind + wrap.dataset.id;
   const base = ui.swiped === key ? -SWIPE_W : 0;
   const startX = e.clientX;
+  const startY = e.clientY;
   let dx = base;
   let moved = false;
   const move = (ev) => {
-    if (Math.abs(ev.clientX - startX) > 6) moved = true;
+    const ax = Math.abs(ev.clientX - startX);
+    if (!moved && ax > 12 && ax > Math.abs(ev.clientY - startY)) moved = true;
     if (!moved) return;
     dx = Math.min(0, Math.max(-SWIPE_W, base + ev.clientX - startX));
     body.classList.add('dragging');
     body.style.transform = `translateX(${dx}px)`;
   };
-  const up = () => {
+  const done = () => {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', cancel);
+  };
+  const cancel = () => { done(); body.classList.remove('dragging'); body.style.transform = ''; };
+  const up = () => {
+    done();
     if (!moved) return;
     ui.swiped = dx < -SWIPE_W / 2 ? key : null;
     ui.justDragged = true;
@@ -885,6 +1025,7 @@ root.addEventListener('pointerdown', (e) => {
   };
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', cancel);
 });
 
 document.addEventListener('click', (e) => {
@@ -898,6 +1039,8 @@ root.addEventListener('click', (e) => {
   if (!el || el.disabled) return;
   if (el.classList.contains('overlay') && e.target !== el) return;
   if (el.dataset.act !== 'delete-hand') ui.confirmDelete = false;
+  if (el.dataset.act !== 'delete-session') ui.confirmDeleteSession = false;
+  if (el.dataset.act !== 'new-table') ui.confirmNewTable = false;
   handlers[el.dataset.act]?.(el, e);
 });
 
@@ -921,9 +1064,20 @@ root.addEventListener('input', (e) => {
       s.game.anteType = 'bb';
       s.game.ante = s.game.bb;
     } else if (k === 'stack') s.myStack = parseStack(v);
-    else s[k] = v;
+    else {
+      s[k] = v;
+      const box = e.target.closest('.need');
+      if (box) box.classList.toggle('missing', !v.trim());
+    }
     const eq = root.querySelector('#t-eq');
     if (eq && s.myStack != null) eq.textContent = `My stack = ${F(s.myStack)} (${(s.myStack / s.game.bb).toFixed(1)} BB)`;
+    save();
+    return;
+  }
+  if (key === 'seat-note') {
+    const s = session();
+    s.seatNotes = s.seatNotes || {};
+    s.seatNotes[Number(e.target.dataset.k)] = v;
     save();
     return;
   }
@@ -952,8 +1106,21 @@ root.addEventListener('input', (e) => {
     if (eq) eq.textContent = h.seats[seat].stack != null ? '= ' + F(h.seats[seat].stack) : '';
     return;
   }
-  if (key === 'name') { h.seats[seat].name = v; save(); }
+  if (key === 'name') { h.seats[seat].name = v; syncNote(h, seat, v); save(); }
 });
+
+// A tag written in a hand also becomes the note for that real seat at the current table.
+function syncNote(h, i, v) {
+  const s = session();
+  if (!h.heroSeat || (h.tableNo || 1) !== (s.tableNo || 1)) return;
+  s.seatNotes = s.seatNotes || {};
+  s.seatNotes[absSeat(h.heroSeat, i, h.seats.length)] = v;
+}
+
+function toTop() {
+  root.querySelector('.home')?.scrollTo(0, 0);
+  window.scrollTo(0, 0);
+}
 
 // Tapping a blind on the home card means the level is changing: start from an empty
 // field, and put the old value back if nothing was typed.
@@ -982,19 +1149,22 @@ root.addEventListener('change', (e) => {
     if (f) restore(f);
     return;
   }
-  if (['stack', 'name'].includes(e.target.dataset.input)) render();
+  if (['stack', 'name', 'seat-note'].includes(e.target.dataset.input)) render();
 });
 
 // Hand sheet: swipe left/right (or drag with the mouse) to move between hands.
 root.addEventListener('pointerdown', (e) => {
   if (ui.view !== 'review' || !e.target.closest('#hs')) return;
   const x0 = e.clientX;
+  const y0 = e.clientY;
+  const done = () => { window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', done); };
   const up = (ev) => {
-    window.removeEventListener('pointerup', up);
+    done();
     const dx = ev.clientX - x0;
-    if (Math.abs(dx) > 60) stepHand(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(ev.clientY - y0)) stepHand(dx < 0 ? 1 : -1);
   };
   window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', done);
 });
 
 // Desktop shortcuts: arrows on the hand sheet; F / C / R, digits in the raise panel, Enter, Esc.
