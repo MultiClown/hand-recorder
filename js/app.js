@@ -69,6 +69,7 @@ function newHand(session) {
       st.name = session.seatNotes?.[k] || '';
       const v = session.seatStacks?.[k];
       if (i !== HERO && v > 0) { st.stack = v; st.stackSource = 'table'; }
+      if (i !== HERO) st.state = session.seatEmpty?.[k] ? 'away' : 'out';
     });
   }
   const hand = {
@@ -222,18 +223,16 @@ function tableCard(s) {
     const a = ((-90 + ((k - 0.5) * 360) / n) * Math.PI) / 180;
     const note = s.seatNotes?.[k] || '';
     const stack = s.heroSeat === k ? s.myStack : s.seatStacks?.[k];
-    seats += `<button class="tseat ${s.heroSeat === k ? 'me' : ''}" data-act="seat-note" data-k="${k}"
-      style="left:${50 + 42 * Math.cos(a)}%;top:${50 + 38 * Math.sin(a)}%"><b>${s.heroSeat === k ? 'ME' : k}</b>${note ? `<span>${esc(note)}</span>` : ''}${stack > 0 ? `<i>${F(stack)}</i>` : ''}</button>`;
+    const empty = s.heroSeat !== k && s.seatEmpty?.[k];
+    seats += `<button class="tseat ${s.heroSeat === k ? 'me' : ''} ${empty ? 'empty' : ''}" data-act="seat-note" data-k="${k}"
+      style="left:${50 + 42 * Math.cos(a)}%;top:${50 + 38 * Math.sin(a)}%"><b>${s.heroSeat === k ? 'ME' : k}</b>${empty ? '<span>empty</span>' : `${note ? `<span>${esc(note)}</span>` : ''}${stack > 0 ? `<i>${F(stack)}</i>` : ''}`}</button>`;
   }
   return `<div class="card ttable">
     <div class="row between"><span class="label">Table${(s.tableNo || 1) > 1 ? ` #${s.tableNo}` : ''}</span>
       <div class="seg" style="flex:none">${[6, 8, 9, 10].map((m) => `<button class="${n === m ? 'on' : ''}" data-act="t-size" data-n="${m}">${m}-max</button>`).join('')}</div></div>
     <div class="mini-table"><div class="felt"></div><span class="dealer-spot">Dealer</span>${seats}</div>
     <div class="hint">${s.heroSeat ? 'Tap a seat for a note and a stack. New hands pick both up.' : 'Tap your seat, then "This is my seat".'}</div>
-    <div class="row"><div class="seg" style="flex:1">
-        <button class="${db.settings.realTable !== false ? 'on' : ''}" data-act="view" data-v="real">Real table</button>
-        <button class="${db.settings.realTable === false ? 'on' : ''}" data-act="view" data-v="hero">Me at bottom</button></div>
-      <button class="secondary" data-act="new-table">${ui.confirmNewTable ? 'Tap again' : 'Moved tables'}</button></div>
+    <button class="secondary" data-act="new-table">${ui.confirmNewTable ? 'Tap again to clear this table' : 'Moved to a new table'}</button>
   </div>`;
 }
 
@@ -242,7 +241,8 @@ function homeSheet(s) {
   if (sh.type === 'seatnote') {
     return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
       <h3>Seat ${sh.k}</h3>
-      ${s.heroSeat === sh.k ? '<div class="muted">Your seat</div>' : `<button class="secondary" data-act="my-seat" data-k="${sh.k}">This is my seat</button>`}
+      ${s.heroSeat === sh.k ? '<div class="muted">Your seat</div>' : `<div class="row"><button class="secondary" style="flex:1" data-act="my-seat" data-k="${sh.k}">This is my seat</button>
+        <button class="secondary ${s.seatEmpty?.[sh.k] ? 'on-empty' : ''}" style="flex:1" data-act="seat-empty" data-k="${sh.k}">${s.seatEmpty?.[sh.k] ? 'Empty · tap to fill' : 'Mark seat empty'}</button></div>`}
       ${s.heroSeat === sh.k ? '' : `<label class="muted">Note about the player here</label>
       <input data-input="seat-note" data-k="${sh.k}" placeholder="e.g. hat guy, aggro reg" value="${esc(s.seatNotes?.[sh.k] || '')}">`}
       <label class="muted">Stack <span class="hint">in ${STACK_UNITS.find(([u]) => u === stackUnit())[1]} · a rough number is fine</span></label>
@@ -520,11 +520,11 @@ function exportForEditor() {
   copy(json);
 }
 
-// Real-table view puts each seat where it actually is (dealer at the top, seat 1 on
-// the dealer's left, counting clockwise); otherwise hero sits at the bottom.
+// Once hero's seat is known, seats sit where they really are (dealer at the top, seat 1
+// on the dealer's left, counting clockwise); before that, hero sits at the bottom.
 function seatAngle(h, i) {
   const n = h.seats.length;
-  if (h.heroSeat && db.settings.realTable !== false) return -90 + ((absSeat(h.heroSeat, i, n) - 0.5) * 360) / n;
+  if (h.heroSeat) return -90 + ((absSeat(h.heroSeat, i, n) - 0.5) * 360) / n;
   return 90 + (i * 360) / n;
 }
 const SEAT_POS = (h, i, rx, ry, rot = 0) => {
@@ -880,6 +880,12 @@ function seatTap(i) {
     const seat = h.seats[i];
     seat.state = order[(order.indexOf(seat.state) + 1) % 3];
     if (seat.state !== 'in') delete h.holes[i];
+    const s = session();
+    if (h.heroSeat && (h.tableNo || 1) === (s.tableNo || 1)) {
+      s.seatEmpty = s.seatEmpty || {};
+      const k = absSeat(h.heroSeat, i, h.seats.length);
+      if (seat.state === 'away') s.seatEmpty[k] = true; else delete s.seatEmpty[k];
+    }
     placeButton(h);
     save();
     return render();
@@ -948,14 +954,21 @@ const handlers = {
   'note-mode'() { ui.noteMode = !ui.noteMode; render(); },
   't-size'(el) { const s = session(); s.maxSeats = Number(el.dataset.n); if (s.heroSeat > s.maxSeats) s.heroSeat = null; save(); render(); },
   'seat-note'(el) { ui.sheet = { type: 'seatnote', k: Number(el.dataset.k) }; render(); },
-  'my-seat'(el) { session().heroSeat = Number(el.dataset.k); save(); render(); },
-  view(el) { db.settings.realTable = el.dataset.v === 'real'; save(); render(); },
+  'my-seat'(el) { const s = session(); const k = Number(el.dataset.k); s.heroSeat = k; if (s.seatEmpty) delete s.seatEmpty[k]; save(); render(); },
+  'seat-empty'(el) {
+    const s = session();
+    const k = Number(el.dataset.k);
+    s.seatEmpty = s.seatEmpty || {};
+    if (s.seatEmpty[k]) delete s.seatEmpty[k]; else s.seatEmpty[k] = true;
+    save(); render();
+  },
   'new-table'() {
     if (!ui.confirmNewTable) { ui.confirmNewTable = true; return render(); }
     const s = session();
     s.tableNo = (s.tableNo || 1) + 1;
     s.seatNotes = {};
     s.seatStacks = {};
+    s.seatEmpty = {};
     s.heroSeat = null;
     ui.confirmNewTable = false;
     save();

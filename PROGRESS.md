@@ -25,7 +25,7 @@ Web app (PWA later) for recording live poker hands. Prototype on desktop first, 
 - [x] Hand: missing-K warning under the big blind, Won/Muck per player at showdown, rough-stack nudge on Save, chips behind in the hand sheet, More menu with move earlier/later
 - [x] Export: tournament.itm/players_left/result, field.itm, actions effective/behind, result.mucked/uncalled_returned
 - [x] Stacks from all-ins: "All-in" switch on Raise and "Call all-in for less" work out the exact stack; covering opponents get hero's stack as a one-tap estimate; saved hands with blank stacks show "missing stacks" + Add stacks shortcut; export stack_source / stack_at_least
-- [x] Seat stacks on the home table (tap a seat: note + stack); new hands pick them up; saved hands write opponents' end stacks back; numbers always shown as 1,000 (switch removed)
+- [x] Seat stacks on the home table (tap a seat: note + stack); new hands pick them up; saved hands write opponents' end stacks back; numbers always shown as 1,000 (switch removed); empty seats set on the home table (synced with "away" in Setup); "Me at bottom" toggle removed
 
 ## Phase 2 (after feedback)
 - Iterate on the flow based on desktop testing

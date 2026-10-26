@@ -349,3 +349,6 @@ textarea.note { min-height: 40px; }
 .sd-stack.derived { box-shadow: inset 0 0 0 1px var(--brand2); }
 .badge { font-size: 11px; color: #ffb4c0; background: #4a2330; border-radius: 8px; padding: 2px 7px; }
 .tseat i { font-style: normal; font-size: 10px; color: var(--brand2); }
+.tseat.empty { background: transparent; border-style: dashed; opacity: .55; }
+.tseat.empty span { color: var(--dim); }
+.secondary.on-empty { background: #4a2330; color: #ffb4c0; }
