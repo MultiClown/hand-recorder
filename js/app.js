@@ -388,7 +388,7 @@ function reviewView() {
       ${involved(h).filter((x) => x !== HERO).map((v) => row(v, `<b>${st.pos[v]}</b>${h.seats[v].name ? ` <span class="tag">${esc(h.seats[v].name)}</span>` : ''}`)).join('')}
       ${streetsOf(st).map((sx) => `<div class="hs-street">
         <div class="hs-sh"><b>${STREETS[sx.street]}</b>${sx.cards.map(bigCard).join('')}${sx.street ? `<span class="muted">pot ${F(sx.pot)}</span>` : ''}</div>
-        <div class="hs-acts">${sx.acts.map((e) => `<span class="hs-a"><b>${posName(h, st, e.seat)}</b> <span class="k-${e.a}">${actionText(e, full)}</span></span>`).join('') || '<span class="muted">—</span>'}</div></div>`).join('')}
+        <div class="hs-acts">${sx.acts.map((e) => `<span class="hs-a"><b>${posName(h, st, e.seat)}</b> <span class="k-${e.a}">${actionText(e, full)}</span>${e.behind > 0 ? ` <span class="behind">${F(e.behind)} behind</span>` : ''}</span>`).join('') || '<span class="muted">—</span>'}</div></div>`).join('')}
       <div class="hs-result">${winners.length
         ? `${winners.map((w) => posName(h, st, w)).join(' & ')} ${winners.length > 1 ? 'split' : 'wins'} ${F(st.pot)}${st.phase === 'showdown' ? ' at showdown' : ''}
            · <span class="${n >= 0 ? 'pos-net' : 'neg-net'}">Hero ${n >= 0 ? '+' : ''}${F(n)}</span>`
@@ -398,15 +398,21 @@ function reviewView() {
     </div>
     <div class="hs-nav">
       <button class="btn-ghost" data-act="prev-hand" ${idx <= 0 ? 'disabled' : ''}>‹ Prev</button>
-      <button class="btn-ghost" data-act="copy-hand">Copy</button>
-      <button class="btn-ghost del" data-act="delete-hand">${ui.confirmDelete ? 'Tap again' : 'Delete'}</button>
-      <button class="btn-ghost" data-act="next-hand" ${idx >= s.hands.length - 1 ? 'disabled' : ''}>Next ›</button></div>`;
+      <button class="btn-ghost" data-act="hand-menu">More</button>
+      <button class="btn-ghost" data-act="next-hand" ${idx >= s.hands.length - 1 ? 'disabled' : ''}>Next ›</button></div>
+    ${ui.sheet?.type === 'handmenu' ? `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <h3>Hand ${h.num}</h3>
+      <div class="row"><button class="secondary" style="flex:1" data-act="move-hand" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>Move earlier</button>
+        <button class="secondary" style="flex:1" data-act="move-hand" data-d="1" ${idx >= s.hands.length - 1 ? 'disabled' : ''}>Move later</button></div>
+      <button class="secondary" data-act="copy-hand">Copy as text</button>
+      <button class="danger" data-act="delete-hand">${ui.confirmDelete ? 'Tap again to delete' : 'Delete hand'}</button>
+      <button class="primary" data-act="close-sheet">Done</button></div></div>` : ''}`;
 }
 
 function stepHand(d) {
   const s = session();
   const next = s.hands[s.hands.indexOf(hand()) + d];
-  if (!next) return;
+  if (!next || ui.sheet) return;
   ui.handId = next.id;
   ui.confirmDelete = false;
   render();
@@ -429,7 +435,8 @@ function editorHand(h) {
     const a = { who: who(e.seat), act: e.a };
     if (e.a === 'raise') a.to = e.to;
     if (e.a === 'bet') a.amount = e.to;
-    if (e.allin) { a.allin = true; if (e.a === 'call') a.amount = e.added; }
+    if (e.allin) { a.allin = true; if (e.a === 'call') a.amount = e.added; if (e.eff != null) a.effective = e.eff; }
+    if (e.behind != null) a.behind = e.behind;
     streets.at(-1).actions.push(a);
   }
   const { winners } = results(h, st);
@@ -449,6 +456,8 @@ function editorHand(h) {
       winner: winners.length > 1 ? winners.map(who) : winners.length ? who(winners[0]) : null,
       showdown: st.phase === 'showdown',
       pot: st.pot,
+      mucked: (h.mucked || []).filter((x) => st.active.includes(x)).map(who),
+      uncalled_returned: st.uncalled ? { who: who(st.uncalled.seat), amount: st.uncalled.amount } : null,
     },
     field: { entries: num(t.entries), left: num(t.left), itm: num(t.itm), bullets: num(t.bullets) },
     flags: h.done ? [] : ['not finished in the app'],
@@ -698,9 +707,13 @@ function raisePanel(h, st) {
       <button data-act="preset" data-v="${minTo}">Min <span class="muted">${F(minTo)}</span></button></div>
     <input type="range" data-input="slider" min="${minTo}" max="${maxTo}" step="${step}" value="${Math.min(maxTo, Math.max(minTo, v || minTo))}">
     <div class="keypad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'].map((k) => `<button data-act="key" data-k="${k}">${k}</button>`).join('')}</div>
-    <div class="row"><button class="secondary" style="flex:1" data-act="cancel-raise">Cancel</button>
-      <button class="primary" style="flex:2" id="rconfirm" data-act="confirm-raise" ${v <= st.currentBet ? 'disabled' : ''}>${verb} ${F(v)}</button></div>`;
+    ${ui.raise.warn != null ? kWarning(ui.raise.warn, h.game.bb, 'warn-k', 'warn-keep') : `<div class="row"><button class="secondary" style="flex:1" data-act="cancel-raise">Cancel</button>
+      <button class="primary" style="flex:2" id="rconfirm" data-act="confirm-raise" ${v <= st.currentBet ? 'disabled' : ''}>${verb} ${F(v)}</button></div>`}`;
 }
+
+const kWarning = (v, bb, fix, keep) => `<div class="kwarn"><div><b>${fmt(v, true)}</b> is less than the big blind (${fmt(bb, true)}). Missing a K?</div>
+  <div class="row"><button class="primary" style="flex:2" data-act="${fix}">Use ${fmt(v * 1000, true)}</button>
+    <button class="secondary" style="flex:1" data-act="${keep}">Keep ${fmt(v, true)}</button></div></div>`;
 
 function stacksBlock(h, st) {
   const unit = stackUnit();
@@ -710,24 +723,39 @@ function stacksBlock(h, st) {
       const c = h.holes[s];
       return `<div class="inv-row"><span class="who">${posName(h, st, s)}</span>
         <span class="inv-cards">${c?.[0] && c?.[1] ? c.map((x) => mc(x)).join('') : ''}</span>
-        <input data-input="stack" data-seat="${s}" inputmode="decimal" placeholder="stack" value="${h.seats[s].stack != null ? +(h.seats[s].stack / unit).toFixed(2) : ''}">
+        <input class="${s !== HERO && st.total[s] > 0 && !(h.seats[s].stack > 0) ? 'ask' : ''}" data-input="stack" data-seat="${s}" inputmode="decimal" placeholder="rough" value="${h.seats[s].stack != null ? +(h.seats[s].stack / unit).toFixed(2) : ''}">
         ${s === HERO ? '<span class="namefill"></span>' : `<input data-input="name" data-seat="${s}" placeholder="tag" value="${esc(h.seats[s].name)}">`}</div>`;
     }).join('')}`;
 }
 
+// Opponents who put chips in but have no stack entered yet.
+const stacksMissing = (h, st) => involved(h).filter((x) => x !== HERO && st.total[x] > 0 && !(h.seats[x].stack > 0));
+
 function endPanel(h, st) {
   const { winners } = results(h, st);
-  let html = '';
-  if (st.phase === 'done') {
-    html += `<div class="prompt">${seatLabel(h, st, winners[0])} wins ${F(st.pot)}</div>`;
-  } else {
-    html += `<div class="row between"><span class="prompt">Showdown <small>winner (tap 2+ to split)</small></span>
-      <button class="btn-ghost" data-act="goto" data-stage="cards">Edit cards</button></div>
-      <div class="chips">${st.active.map((s) => `<button class="${winners.includes(s) ? 'on' : ''}" data-act="winner" data-seat="${s}">${posName(h, st, s)} <span class="muted">${handName(h.holes[s], st.board)}</span></button>`).join('')}</div>`;
-  }
-  // Stacks and tags come last: the hand is recorded first, details after.
-  html += stacksBlock(h, st);
-  html += `<div class="label">Notes <span class="muted">(optional)</span></div>${notesFields(h)}
+  const showdown = st.phase !== 'done';
+  const unit = stackUnit();
+  const mucked = h.mucked || [];
+  let html = showdown
+    ? `<div class="row between"><span class="prompt">Showdown <small>Muck anyone who didn't show</small></span>
+        <button class="btn-ghost" data-act="goto" data-stage="cards">Edit cards</button></div>`
+    : `<div class="prompt">${seatLabel(h, st, winners[0])} wins ${F(st.pot)}</div>`;
+  // One row per player: cards, rough starting stack, and at showdown who won or mucked.
+  html += `<div class="row between"><span class="label">Stacks at start <span class="muted">(blank = Hero's)</span></span>
+      <div class="seg" style="flex:none">${STACK_UNITS.map(([u, l]) => `<button class="${unit === u ? 'on' : ''}" data-act="stack-unit" data-u="${u}">${l}</button>`).join('')}</div></div>`;
+  html += involved(h).map((x) => {
+    const c = h.holes[x];
+    const live = st.active.includes(x);
+    const ask = x !== HERO && st.total[x] > 0 && !(h.seats[x].stack > 0);
+    const cards = c?.[0] && c?.[1] ? `${c.map((y) => mc(y)).join('')} <span class="muted">${showdown && live ? handName(c, st.board) : ''}</span>` : `<span class="muted">${live ? 'no cards' : 'folded'}</span>`;
+    return `<div class="sd-row"><span class="who">${posName(h, st, x)}</span><span class="sd-cards">${cards}</span>
+      <input class="sd-stack ${ask ? 'ask' : ''}" data-input="stack" data-seat="${x}" inputmode="decimal" placeholder="rough" value="${h.seats[x].stack != null ? +(h.seats[x].stack / unit).toFixed(2) : ''}">
+      ${showdown && live ? `<button class="sd-btn ${winners.includes(x) ? 'won' : ''}" data-act="winner" data-seat="${x}">Won</button>
+        <button class="sd-btn ${mucked.includes(x) ? 'mucked' : ''}" data-act="muck" data-seat="${x}">Muck</button>` : showdown ? '<span class="sd-gap"></span>' : ''}</div>`;
+  }).join('');
+  const blank = stacksMissing(h, st);
+  html += `${notesFields(h)}
+    ${ui.saveWarned && blank.length ? `<div class="kwarn">No stack yet for <b>${blank.map((x) => posName(h, st, x)).join(', ')}</b>. A round number is enough. Tap Save again to skip.</div>` : ''}
     <button class="primary" data-act="finish" ${winners.length ? '' : 'disabled'}>Save hand</button>`;
   return html;
 }
@@ -750,9 +778,9 @@ function sheetView(h, st) {
     <div class="chips">${occupiedSeats(h).filter((s) => h.seats[s].state === 'in').map((s) => `<button class="${sh.seat === s ? 'on' : ''}" data-act="edit-seat" data-seat="${s}">${posName(h, st, s)}</button>`).join('')}</div>
     <div class="muted">Action</div>
     <div class="chips">${kinds.map((k) => `<button class="${sh.a === k ? 'on' : ''}" data-act="edit-a" data-a="${k}">${k === 'raise' ? 'Bet / raise' : k === 'allin' ? 'All-in' : k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>
-    ${sh.a === 'raise' ? `<label class="muted">To amount</label><input data-input="edit-to" inputmode="decimal" value="${ev.to ? F(ev.to) : ''}">` : ''}
-    <div class="row"><button class="danger" data-act="edit-delete">Delete</button><span style="flex:1"></span>
-      <button class="secondary" data-act="close-sheet">Cancel</button><button class="primary" data-act="edit-save">Save</button></div>
+    ${sh.a === 'raise' ? `<label class="muted">To amount</label><input data-input="edit-to" inputmode="decimal" value="${sh.warn != null ? sh.warn : ev.to ? F(ev.to) : ''}">` : ''}
+    ${sh.warn != null ? kWarning(sh.warn, h.game.bb, 'edit-k', 'edit-keep') : `<div class="row"><button class="danger" data-act="edit-delete">Delete</button><span style="flex:1"></span>
+      <button class="secondary" data-act="close-sheet">Cancel</button><button class="primary" data-act="edit-save">Save</button></div>`}
   </div></div>`;
 }
 
@@ -843,7 +871,7 @@ function seatTap(i) {
 }
 
 const handlers = {
-  home() { ui.view = 'home'; ui.noteMode = false; ui.stackEdit = false; ui.raise = null; ui.sheet = null; ui.slot = null; ui.confirmDelete = false; render(); },
+  home() { ui.view = 'home'; ui.saveWarned = false; ui.noteMode = false; ui.stackEdit = false; ui.raise = null; ui.sheet = null; ui.slot = null; ui.confirmDelete = false; render(); },
   units() { db.settings.fullNumbers = !db.settings.fullNumbers; save(); render(); },
   'new-session'() { ui.sessionId = newSession().id; toast('New tournament started'); toTop(); },
   session(el) { ui.sessionId = el.dataset.id; render(); toTop(); },
@@ -855,6 +883,16 @@ const handlers = {
   backup() { backup(); },
   restore() { root.querySelector('#restore-file').click(); },
   'prev-hand'() { stepHand(-1); },
+  'hand-menu'() { ui.sheet = { type: 'handmenu' }; render(); },
+  'move-hand'(el) {
+    const s = session();
+    const i = s.hands.indexOf(hand());
+    const j = i + Number(el.dataset.d);
+    if (j < 0 || j >= s.hands.length) return;
+    [s.hands[i], s.hands[j]] = [s.hands[j], s.hands[i]];
+    s.hands.forEach((x, k) => { x.num = k + 1; });
+    save(); render();
+  },
   'next-hand'() { stepHand(1); },
   'edit-hand'() { hand().done = false; save(); ui.view = 'hand'; render(); },
   'delete-hand'() {
@@ -862,6 +900,7 @@ const handlers = {
     const s = session();
     s.hands = s.hands.filter((h) => h.id !== ui.handId);
     s.hands.forEach((h, i) => { h.num = i + 1; });
+    ui.sheet = null;
     save(); handlers.home();
   },
   ante(el) {
@@ -929,9 +968,20 @@ const handlers = {
   },
   'confirm-raise'() {
     const v = raiseValue();
-    const st = replay(hand());
+    const h = hand();
+    const st = replay(h);
     if (v <= st.currentBet) return;
+    if (v < h.game.bb) { ui.raise.warn = v; return render(); }
     doAction(st.currentBet > 0 ? 'raise' : 'bet', v);
+  },
+  'warn-k'() {
+    const v = ui.raise.warn * 1000;
+    const st = replay(hand());
+    doAction(st.currentBet > 0 ? 'raise' : 'bet', v);
+  },
+  'warn-keep'() {
+    const st = replay(hand());
+    doAction(st.currentBet > 0 ? 'raise' : 'bet', ui.raise.warn);
   },
   undo() { const h = hand(); h.events.pop(); h.winners = []; h.done = false; ui.raise = null; save(); render(); },
   winner(el) {
@@ -942,9 +992,19 @@ const handlers = {
     h.winners = cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s];
     save(); render();
   },
+  muck(el) {
+    const h = hand();
+    const x = Number(el.dataset.seat);
+    const m = h.mucked || [];
+    h.mucked = m.includes(x) ? m.filter((y) => y !== x) : [...m, x];
+    h.winners = [];
+    save(); render();
+  },
   finish() {
     const h = hand();
     const s = session();
+    if (!ui.saveWarned && stacksMissing(h, replay(h)).length) { ui.saveWarned = true; return render(); }
+    ui.saveWarned = false;
     h.winners = results(h).winners;
     h.done = true;
     // The latest hand moves the live tournament forward: my stack after the hand.
@@ -962,17 +1022,21 @@ const handlers = {
   },
   'edit-seat'(el) { ui.sheet.seat = Number(el.dataset.seat); render(); },
   'edit-a'(el) { ui.sheet.a = el.dataset.a; render(); },
-  'edit-save'() {
+  'edit-save'(el, e, forced) {
     const h = hand();
     const ev = h.events[ui.sheet.idx];
+    let to = forced;
+    if (ui.sheet.a === 'raise' && to == null) {
+      to = parseAmount(root.querySelector('[data-input="edit-to"]')?.value);
+      if (to && to < h.game.bb) { ui.sheet.warn = to; return render(); }
+    }
     ev.seat = ui.sheet.seat;
     ev.a = ui.sheet.a;
-    if (ev.a === 'raise') {
-      const to = parseAmount(root.querySelector('[data-input="edit-to"]')?.value);
-      if (to) ev.to = to;
-    } else delete ev.to;
+    if (ev.a === 'raise') { if (to) ev.to = to; } else delete ev.to;
     ui.sheet = null; save(); render();
   },
+  'edit-k'() { handlers['edit-save'](null, null, ui.sheet.warn * 1000); },
+  'edit-keep'() { handlers['edit-save'](null, null, ui.sheet.warn); },
   'edit-delete'() { hand().events.splice(ui.sheet.idx, 1); ui.sheet = null; save(); render(); },
   'swipe-delete'(el) {
     const { kind, id } = el.closest('.swipe').dataset;

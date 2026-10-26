@@ -1,6 +1,6 @@
 // Offline support. Network first, so a published update shows up as soon as
 // the phone is online; the cached copy is used when there is no connection.
-const CACHE = 'hand-recorder-v2';
+const CACHE = 'hand-recorder-v3';
 const FILES = [
   './', 'index.html', 'styles.css', 'js/app.js', 'js/engine.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',

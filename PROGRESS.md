@@ -19,6 +19,12 @@ Web app (PWA later) for recording live poker hands. Prototype on desktop first, 
 - [x] Backup / Restore on home page (merge by session id, never deletes).
 - [x] Hosting: GitHub Pages from public repo MultiClown/hand-recorder (main, root) → https://multiclown.github.io/hand-recorder/ . Push to main = live in ~1 min. Move to Cloudflare Pages later if sync/sharing is needed.
 
+## First live session feedback (2026-10-25)
+- [x] Engine: uncalled bets returned (pot = what the winner took), effective stack on all-ins, chips behind, mucked players
+- [x] Home: table size per tournament, pick my seat, real-table view toggle, seat notes, "Moved tables"; details card (buy-in, GTD, ITM, entries) with missing outlines + export warning; My result (bullets stepper, finish, cash-out, start/bust); date = first hand's day; tap-lag fix (swipe ignores scrolls, current card not swipeable, scroll to top on switch)
+- [x] Hand: missing-K warning under the big blind, Won/Muck per player at showdown, rough-stack nudge on Save, chips behind in the hand sheet, More menu with move earlier/later
+- [x] Export: tournament.itm/players_left/result, field.itm, actions effective/behind, result.mucked/uncalled_returned
+
 ## Phase 2 (after feedback)
 - Iterate on the flow based on desktop testing
 - Drag an action onto a different seat
