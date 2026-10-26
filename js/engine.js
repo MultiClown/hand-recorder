@@ -106,6 +106,8 @@ export function replay(hand) {
     lastActor: null,
     toAct: null,
     log: [],
+    derived: {}, // stacks worked out from an all-in with a known amount
+    estimate: {}, // stacks that cover hero: suggest hero's stack
   };
   occ.forEach((s) => { st.contrib[s] = 0; st.total[s] = 0; st.anteBy[s] = 0; });
   st.remaining = () => Infinity;
@@ -114,7 +116,7 @@ export function replay(hand) {
   // An empty or zero stack means "not entered", never all-in for nothing.
   // Until an opponent's stack is entered, they play as if covering the same stack as hero.
   const known = (s) => (hand.seats[s].stack > 0 ? hand.seats[s].stack : null);
-  const stackOf = (s) => known(s) ?? known(HERO) ?? Infinity;
+  const stackOf = (s) => known(s) ?? st.derived[s] ?? known(HERO) ?? Infinity;
   const remaining = (s) => stackOf(s) - st.total[s] - st.anteBy[s];
   st.remaining = remaining;
   st.stackOf = stackOf;
@@ -187,9 +189,14 @@ export function replay(hand) {
       target = st.contrib[s] + remaining(s);
       a = target > st.currentBet ? 'raise' : 'call';
     }
+    // An all-in for a stated amount tells us the whole stack: everything put in so far plus this.
+    if (ev.jam && known(s) == null) {
+      const extra = a === 'call' ? (ev.amt ?? st.currentBet - st.contrib[s]) : target - st.contrib[s];
+      st.derived[s] = st.total[s] + st.anteBy[s] + Math.max(0, extra);
+    }
     let added = 0;
     if (a === 'fold') st.folded.add(s);
-    else if (a === 'call') added = put(s, st.currentBet - st.contrib[s]);
+    else if (a === 'call') added = put(s, ev.jam && ev.amt != null ? ev.amt : st.currentBet - st.contrib[s]);
     else if (a === 'bet' || a === 'raise') {
       added = put(s, target - st.contrib[s]);
       const to = st.contrib[s];
@@ -219,6 +226,19 @@ export function replay(hand) {
     });
     settle();
   });
+
+  // Stacks learned later in the hand (a short all-in call) change what an earlier shove was worth.
+  st.log.forEach((e) => { if (e.allin) e.eff = effectiveStack(st, occ, e.seat); });
+
+  // Unknown stacks that went all-in against hero, or called hero's all-in, cover hero:
+  // suggest hero's stack, which is the effective stack anyway.
+  const heroStack = known(HERO);
+  if (heroStack) {
+    occ.forEach((s) => {
+      if (s === HERO || known(s) != null || st.derived[s] != null || st.folded.has(s)) return;
+      if (st.allin.has(s) || st.allin.has(HERO)) st.estimate[s] = heroStack;
+    });
+  }
 
   return finish(st, occ);
 }

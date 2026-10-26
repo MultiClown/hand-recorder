@@ -169,6 +169,7 @@ function handSummary(h) {
   const vs = involved(h).filter((s) => s !== HERO).map((s) => st.pos[s]).join(', ');
   const n = net[HERO] || 0;
   const status = !h.done ? '<span class="muted">in progress</span>'
+    : stacksMissing(h, st).length ? '<span class="badge">missing stacks</span>'
     : winners.length ? `<span class="${n >= 0 ? 'pos-net' : 'neg-net'}">${n >= 0 ? '+' : ''}${F(n)}</span>` : '';
   return `<button class="hand-item" data-act="open" data-id="${h.id}">
     <span><b>#${h.num}</b> ${cards} <span class="muted">${h.heroPos || ''}${vs ? ' vs ' + vs : ''}</span></span>${status}</button>`;
@@ -383,6 +384,8 @@ function reviewView() {
       <div class="title">Hand ${h.num} / ${s.hands.length}<small>${esc([t.name, blindsText(h.game, full)].filter(Boolean).join(' · '))}</small></div>
       <button class="btn-ghost" data-act="edit-hand">Edit</button></div>
     <div class="hs" id="hs">
+      ${stacksMissing(h, st).length ? `<div class="kwarn row between"><span>Missing stacks: <b>${stacksMissing(h, st).map((x) => posName(h, st, x)).join(', ')}</b></span>
+        <button class="btn-ghost" data-act="add-stacks">Add stacks</button></div>` : ''}
       ${field ? `<div class="muted">${esc(field)}</div>` : ''}
       ${row(HERO, `<b>Hero</b> ${h.heroPos || ''}`)}
       ${involved(h).filter((x) => x !== HERO).map((v) => row(v, `<b>${st.pos[v]}</b>${h.seats[v].name ? ` <span class="tag">${esc(h.seats[v].name)}</span>` : ''}`)).join('')}
@@ -447,7 +450,10 @@ function editorHand(h) {
     level: { sb: h.game.sb, bb: h.game.bb, ante: h.game.anteType === 'bb' ? h.game.ante : 0 },
     hero: { pos: h.heroPos || st.pos[HERO], cards: cards(HERO), stack_start: stackStart(HERO) },
     villains: involved(h).filter((s) => s !== HERO).map((s) => ({
-      pos: st.pos[s], cards: cards(s), stack_start: stackStart(s), ...(h.seats[s].name ? { tag: h.seats[s].name } : {}),
+      pos: st.pos[s], cards: cards(s), stack_start: stackStart(s) ?? st.derived[s] ?? null,
+      stack_source: stackStart(s) ? h.seats[s].stackSource || 'entered' : st.derived[s] != null ? 'allin' : 'unknown',
+      ...(stackStart(s) == null && st.estimate[s] ? { stack_at_least: st.estimate[s] } : {}),
+      ...(h.seats[s].name ? { tag: h.seats[s].name } : {}),
     })),
     say: (h.commentary || '').split('\n').map((x) => x.trim()).filter(Boolean),
     notes: (h.notes || '').trim(),
@@ -668,6 +674,7 @@ function actionPanel(h, st) {
       ${hasStack ? `<button class="a-allin" data-act="do" data-a="allin">All-in ${F(st.remaining(s) + st.contrib[s])}</button>` : ''}
     </div>
     <div class="row between"><span class="hint">Tap a seat to ${facing > 0 ? 'fold' : 'check'} around to it.</span>
+      ${facing > 0 && s !== HERO ? '<button class="btn-ghost" data-act="call-short">Call all-in for less</button>' : ''}
       <button class="btn-ghost" data-act="stacks-edit">Stacks</button></div>`;
 }
 
@@ -677,6 +684,8 @@ function raiseBounds(h, st) {
   const maxTo = isFinite(st.remaining(s)) ? st.remaining(s) + st.contrib[s] : Math.max(minTo * 5, st.pot * 3);
   return { minTo, maxTo, step: Math.max(1, Math.round(h.game.sb / 2)) };
 }
+
+const raiseOk = (st, v) => (ui.raise.mode === 'call' ? v > 0 : v > st.currentBet);
 
 function raiseValue() {
   const v = parseFloat(ui.raise.str);
@@ -698,17 +707,19 @@ function presets(h, st) {
 function raisePanel(h, st) {
   const { minTo, maxTo, step } = raiseBounds(h, st);
   const v = raiseValue();
-  const verb = st.currentBet > 0 ? 'Raise to' : 'Bet';
+  const short = ui.raise.mode === 'call';
+  const verb = short ? 'Calls all-in for' : ui.raise.jam ? 'All-in for' : st.currentBet > 0 ? 'Raise to' : 'Bet';
   const units = [[1, '×1'], [1e3, 'K'], [1e6, 'M']];
   return `<div class="rdisp"><span class="val" id="rval">${esc(ui.raise.str || '0')}</span>
       <div class="seg" style="flex:none">${units.map(([u, l]) => `<button class="${ui.raise.unit === u ? 'on' : ''}" data-act="unit" data-u="${u}">${l}</button>`).join('')}</div>
       <span class="eq" id="req">= ${fmt(v, true)}</span></div>
-    <div class="presets">${presets(h, st).map(([l, val]) => `<button data-act="preset" data-v="${val}">${l} <span class="muted">${F(val)}</span></button>`).join('')}
+    ${short ? '<div class="hint">How much more they called with, all-in. Their stack is worked out from it.</div>' : `<button class="jam ${ui.raise.jam ? 'on' : ''}" data-act="jam">${ui.raise.jam ? '✓ All-in: this was their whole stack' : 'All-in? Tap if this was their whole stack'}</button>`}
+    ${short ? '' : `<div class="presets">${presets(h, st).map(([l, val]) => `<button data-act="preset" data-v="${val}">${l} <span class="muted">${F(val)}</span></button>`).join('')}
       <button data-act="preset" data-v="${minTo}">Min <span class="muted">${F(minTo)}</span></button></div>
-    <input type="range" data-input="slider" min="${minTo}" max="${maxTo}" step="${step}" value="${Math.min(maxTo, Math.max(minTo, v || minTo))}">
+    <input type="range" data-input="slider" min="${minTo}" max="${maxTo}" step="${step}" value="${Math.min(maxTo, Math.max(minTo, v || minTo))}">`}
     <div class="keypad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'].map((k) => `<button data-act="key" data-k="${k}">${k}</button>`).join('')}</div>
     ${ui.raise.warn != null ? kWarning(ui.raise.warn, h.game.bb, 'warn-k', 'warn-keep') : `<div class="row"><button class="secondary" style="flex:1" data-act="cancel-raise">Cancel</button>
-      <button class="primary" style="flex:2" id="rconfirm" data-act="confirm-raise" ${v <= st.currentBet ? 'disabled' : ''}>${verb} ${F(v)}</button></div>`}`;
+      <button class="primary" style="flex:2" id="rconfirm" data-act="confirm-raise" ${raiseOk(st, v) ? '' : 'disabled'}>${verb} ${F(v)}</button></div>`}`;
 }
 
 const kWarning = (v, bb, fix, keep) => `<div class="kwarn"><div><b>${fmt(v, true)}</b> is less than the big blind (${fmt(bb, true)}). Missing a K?</div>
@@ -728,8 +739,8 @@ function stacksBlock(h, st) {
     }).join('')}`;
 }
 
-// Opponents who put chips in but have no stack entered yet.
-const stacksMissing = (h, st) => involved(h).filter((x) => x !== HERO && st.total[x] > 0 && !(h.seats[x].stack > 0));
+// Opponents who put chips in but have no stack entered or worked out from an all-in.
+const stacksMissing = (h, st) => involved(h).filter((x) => x !== HERO && st.total[x] > 0 && !(h.seats[x].stack > 0) && st.derived[x] == null);
 
 function endPanel(h, st) {
   const { winners } = results(h, st);
@@ -746,16 +757,20 @@ function endPanel(h, st) {
   html += involved(h).map((x) => {
     const c = h.holes[x];
     const live = st.active.includes(x);
-    const ask = x !== HERO && st.total[x] > 0 && !(h.seats[x].stack > 0);
+    const derived = !(h.seats[x].stack > 0) ? st.derived[x] : null;
+    const ask = stacksMissing(h, st).includes(x);
+    const est = st.estimate[x];
     const cards = c?.[0] && c?.[1] ? `${c.map((y) => mc(y)).join('')} <span class="muted">${showdown && live ? handName(c, st.board) : ''}</span>` : `<span class="muted">${live ? 'no cards' : 'folded'}</span>`;
     return `<div class="sd-row"><span class="who">${posName(h, st, x)}</span><span class="sd-cards">${cards}</span>
-      <input class="sd-stack ${ask ? 'ask' : ''}" data-input="stack" data-seat="${x}" inputmode="decimal" placeholder="rough" value="${h.seats[x].stack != null ? +(h.seats[x].stack / unit).toFixed(2) : ''}">
+      <input class="sd-stack ${ask ? 'ask' : ''} ${derived ? 'derived' : ''}" data-input="stack" data-seat="${x}" inputmode="decimal"
+        placeholder="${est ? `≈${+(est / unit).toFixed(1)}` : 'rough'}" value="${h.seats[x].stack != null ? +(h.seats[x].stack / unit).toFixed(2) : derived ? +(derived / unit).toFixed(2) : ''}">
       ${showdown && live ? `<button class="sd-btn ${winners.includes(x) ? 'won' : ''}" data-act="winner" data-seat="${x}">Won</button>
         <button class="sd-btn ${mucked.includes(x) ? 'mucked' : ''}" data-act="muck" data-seat="${x}">Muck</button>` : showdown ? '<span class="sd-gap"></span>' : ''}</div>`;
   }).join('');
-  const blank = stacksMissing(h, st);
+  const ests = Object.keys(st.estimate).filter((x) => !(h.seats[x].stack > 0));
+  if (Object.keys(st.derived).some((x) => !(h.seats[x].stack > 0))) html += '<div class="hint">Filled in from the all-in amount.</div>';
+  if (ests.length) html += `<button class="secondary" data-act="use-estimates">They covered you: use your stack (${F(st.estimate[ests[0]])}) for ${ests.map((x) => posName(h, st, Number(x))).join(', ')}</button>`;
   html += `${notesFields(h)}
-    ${ui.saveWarned && blank.length ? `<div class="kwarn">No stack yet for <b>${blank.map((x) => posName(h, st, x)).join(', ')}</b>. A round number is enough. Tap Save again to skip.</div>` : ''}
     <button class="primary" data-act="finish" ${winners.length ? '' : 'disabled'}>Save hand</button>`;
   return html;
 }
@@ -786,20 +801,27 @@ function sheetView(h, st) {
 
 // ---------- Actions ----------
 
-function doAction(a, to) {
+function doAction(a, to, extra = {}) {
   const h = hand();
   const st = replay(h);
   if (st.phase !== 'action') return;
-  h.events.push({ t: 'act', seat: st.toAct, a, to });
+  h.events.push({ t: 'act', seat: st.toAct, a, to, ...extra });
   ui.raise = null;
   save();
   render();
 }
 
-function openRaise() {
+function openRaise(mode) {
   const h = hand();
-  ui.raise = { str: '', unit: h.game.bb >= 1e6 ? 1e6 : h.game.bb >= 1000 ? 1e3 : 1 };
+  ui.raise = { str: '', unit: h.game.bb >= 1e6 ? 1e6 : h.game.bb >= 1000 ? 1e3 : 1, mode };
   render();
+}
+
+// Bet, raise or short all-in call from the raise panel, with the all-in flag when set.
+function commitRaise(v) {
+  const st = replay(hand());
+  if (ui.raise.mode === 'call') return doAction('call', undefined, { jam: true, amt: v });
+  doAction(st.currentBet > 0 ? 'raise' : 'bet', v, ui.raise.jam ? { jam: true } : {});
 }
 
 function setRaiseValue(v) {
@@ -815,8 +837,9 @@ function refreshRaise() {
   val.textContent = ui.raise.str || '0';
   root.querySelector('#req').textContent = `= ${fmt(v, true)}`;
   const btn = root.querySelector('#rconfirm');
-  btn.textContent = `${st.currentBet > 0 ? 'Raise to' : 'Bet'} ${F(v)}`;
-  btn.disabled = v <= st.currentBet;
+  const verb = ui.raise.mode === 'call' ? 'Calls all-in for' : ui.raise.jam ? 'All-in for' : st.currentBet > 0 ? 'Raise to' : 'Bet';
+  btn.textContent = `${verb} ${F(v)}`;
+  btn.disabled = !raiseOk(st, v);
 }
 
 function pickCard(c) {
@@ -969,20 +992,14 @@ const handlers = {
   'confirm-raise'() {
     const v = raiseValue();
     const h = hand();
-    const st = replay(h);
-    if (v <= st.currentBet) return;
+    if (!raiseOk(replay(h), v)) return;
     if (v < h.game.bb) { ui.raise.warn = v; return render(); }
-    doAction(st.currentBet > 0 ? 'raise' : 'bet', v);
+    commitRaise(v);
   },
-  'warn-k'() {
-    const v = ui.raise.warn * 1000;
-    const st = replay(hand());
-    doAction(st.currentBet > 0 ? 'raise' : 'bet', v);
-  },
-  'warn-keep'() {
-    const st = replay(hand());
-    doAction(st.currentBet > 0 ? 'raise' : 'bet', ui.raise.warn);
-  },
+  'warn-k'() { commitRaise(ui.raise.warn * 1000); },
+  'warn-keep'() { commitRaise(ui.raise.warn); },
+  jam() { ui.raise.jam = !ui.raise.jam; render(); },
+  'call-short'() { openRaise('call'); },
   undo() { const h = hand(); h.events.pop(); h.winners = []; h.done = false; ui.raise = null; save(); render(); },
   winner(el) {
     const h = hand();
@@ -992,6 +1009,15 @@ const handlers = {
     h.winners = cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s];
     save(); render();
   },
+  'use-estimates'() {
+    const h = hand();
+    const st = replay(h);
+    Object.entries(st.estimate).forEach(([x, v]) => {
+      if (!(h.seats[x].stack > 0)) { h.seats[x].stack = v; h.seats[x].stackSource = 'estimate'; }
+    });
+    save(); render();
+  },
+  'add-stacks'() { const h = hand(); h.stage = 'play'; h.done = false; ui.view = 'hand'; save(); render(); },
   muck(el) {
     const h = hand();
     const x = Number(el.dataset.seat);
@@ -1003,8 +1029,11 @@ const handlers = {
   finish() {
     const h = hand();
     const s = session();
-    if (!ui.saveWarned && stacksMissing(h, replay(h)).length) { ui.saveWarned = true; return render(); }
-    ui.saveWarned = false;
+    // Stacks worked out from an all-in are saved as the stack.
+    const st0 = replay(h);
+    Object.entries(st0.derived).forEach(([x, v]) => {
+      if (!(h.seats[x].stack > 0)) { h.seats[x].stack = v; h.seats[x].stackSource = 'allin'; }
+    });
     h.winners = results(h).winners;
     h.done = true;
     // The latest hand moves the live tournament forward: my stack after the hand.
@@ -1165,6 +1194,7 @@ root.addEventListener('input', (e) => {
   const seat = Number(e.target.dataset.seat);
   if (key === 'stack') {
     h.seats[seat].stack = parseStack(v);
+    h.seats[seat].stackSource = 'entered';
     save();
     const eq = root.querySelector(`[data-eq="${seat}"]`);
     if (eq) eq.textContent = h.seats[seat].stack != null ? '= ' + F(h.seats[seat].stack) : '';
