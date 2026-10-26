@@ -16,6 +16,8 @@ function load() {
   return { sessions: [], settings: { fullNumbers: false } };
 }
 let db = load();
+// Numbers always show in full (1,000), never 1K.
+db.settings.fullNumbers = true;
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
 }
@@ -61,7 +63,14 @@ function newHand(session) {
   }
   if (session.myStack != null) seats[HERO].stack = session.myStack;
   // Seat notes belong to the table, by real seat number, so they follow the players.
-  if (session.heroSeat) seats.forEach((st, i) => { st.name = session.seatNotes?.[absSeat(session.heroSeat, i, n)] || ''; });
+  if (session.heroSeat) {
+    seats.forEach((st, i) => {
+      const k = absSeat(session.heroSeat, i, n);
+      st.name = session.seatNotes?.[k] || '';
+      const v = session.seatStacks?.[k];
+      if (i !== HERO && v > 0) { st.stack = v; st.stackSource = 'table'; }
+    });
+  }
   const hand = {
     heroSeat: session.heroSeat || null, tableNo: session.tableNo || 1,
     tourney: tourneySnapshot(session),
@@ -180,8 +189,7 @@ function homeView() {
   const dateOf = (x) => new Date(playedAt(x)).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const past = db.sessions.filter((x) => x.id !== s.id).reverse();
   return `<div class="home">
-    <div class="row between"><h1>Hand Recorder</h1>
-      <button class="btn-ghost" data-act="units">${db.settings.fullNumbers ? '1,000' : '1K'}</button></div>
+    <h1>Hand Recorder</h1>
     ${tourneyCard(s, dateOf(s))}
     <button class="big" data-act="new-hand">+ New hand</button>
     ${s.hands.slice().reverse().map((h) => swipe('hand', h.id, handSummary(h))).join('')}
@@ -213,14 +221,15 @@ function tableCard(s) {
   for (let k = 1; k <= n; k++) {
     const a = ((-90 + ((k - 0.5) * 360) / n) * Math.PI) / 180;
     const note = s.seatNotes?.[k] || '';
+    const stack = s.heroSeat === k ? s.myStack : s.seatStacks?.[k];
     seats += `<button class="tseat ${s.heroSeat === k ? 'me' : ''}" data-act="seat-note" data-k="${k}"
-      style="left:${50 + 42 * Math.cos(a)}%;top:${50 + 38 * Math.sin(a)}%"><b>${s.heroSeat === k ? 'ME' : k}</b>${note ? `<span>${esc(note)}</span>` : ''}</button>`;
+      style="left:${50 + 42 * Math.cos(a)}%;top:${50 + 38 * Math.sin(a)}%"><b>${s.heroSeat === k ? 'ME' : k}</b>${note ? `<span>${esc(note)}</span>` : ''}${stack > 0 ? `<i>${F(stack)}</i>` : ''}</button>`;
   }
   return `<div class="card ttable">
     <div class="row between"><span class="label">Table${(s.tableNo || 1) > 1 ? ` #${s.tableNo}` : ''}</span>
       <div class="seg" style="flex:none">${[6, 8, 9, 10].map((m) => `<button class="${n === m ? 'on' : ''}" data-act="t-size" data-n="${m}">${m}-max</button>`).join('')}</div></div>
     <div class="mini-table"><div class="felt"></div><span class="dealer-spot">Dealer</span>${seats}</div>
-    <div class="hint">${s.heroSeat ? 'Tap a seat to note who sits there.' : 'Tap your seat, then "This is my seat".'}</div>
+    <div class="hint">${s.heroSeat ? 'Tap a seat for a note and a stack. New hands pick both up.' : 'Tap your seat, then "This is my seat".'}</div>
     <div class="row"><div class="seg" style="flex:1">
         <button class="${db.settings.realTable !== false ? 'on' : ''}" data-act="view" data-v="real">Real table</button>
         <button class="${db.settings.realTable === false ? 'on' : ''}" data-act="view" data-v="hero">Me at bottom</button></div>
@@ -234,8 +243,12 @@ function homeSheet(s) {
     return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
       <h3>Seat ${sh.k}</h3>
       ${s.heroSeat === sh.k ? '<div class="muted">Your seat</div>' : `<button class="secondary" data-act="my-seat" data-k="${sh.k}">This is my seat</button>`}
-      <label class="muted">Note about the player here</label>
-      <input data-input="seat-note" data-k="${sh.k}" placeholder="e.g. hat guy, aggro reg" value="${esc(s.seatNotes?.[sh.k] || '')}">
+      ${s.heroSeat === sh.k ? '' : `<label class="muted">Note about the player here</label>
+      <input data-input="seat-note" data-k="${sh.k}" placeholder="e.g. hat guy, aggro reg" value="${esc(s.seatNotes?.[sh.k] || '')}">`}
+      <label class="muted">Stack <span class="hint">in ${STACK_UNITS.find(([u]) => u === stackUnit())[1]} · a rough number is fine</span></label>
+      ${s.heroSeat === sh.k
+        ? `<input data-input="t-stack" inputmode="decimal" placeholder="your stack" value="${s.myStack != null ? +(s.myStack / stackUnit()).toFixed(2) : ''}">`
+        : `<input data-input="seat-stack" data-k="${sh.k}" inputmode="decimal" placeholder="e.g. 45" value="${s.seatStacks?.[sh.k] > 0 ? +(s.seatStacks[sh.k] / stackUnit()).toFixed(2) : ''}">`}
       <button class="primary" data-act="close-sheet">Done</button></div></div>`;
   }
   if (sh.type === 'exportwarn') {
@@ -540,7 +553,7 @@ function tableView(h, st) {
     if (seat.state === 'in') {
       if (stage === 'play' && st.allin.has(i)) sub = 'ALL-IN';
       else if (seat.stack != null) sub = F(stage === 'play' ? st.remaining(i) : seat.stack);
-    } else if (seat.state === 'out' && stage === 'setup') sub = 'not in hand';
+    } else if (seat.state === 'out' && stage === 'setup') sub = seat.stack > 0 ? `${F(seat.stack)} · out` : 'not in hand';
     const hole = h.holes[i];
     const cards = hole?.some(Boolean) ? hole.map((c) => mc(c)).join('') : '';
     html += `<div class="${cls.join(' ')}" data-act="seat" data-seat="${i}" style="left:${p.x}%;top:${p.y}%">
@@ -895,7 +908,6 @@ function seatTap(i) {
 
 const handlers = {
   home() { ui.view = 'home'; ui.saveWarned = false; ui.noteMode = false; ui.stackEdit = false; ui.raise = null; ui.sheet = null; ui.slot = null; ui.confirmDelete = false; render(); },
-  units() { db.settings.fullNumbers = !db.settings.fullNumbers; save(); render(); },
   'new-session'() { ui.sessionId = newSession().id; toast('New tournament started'); toTop(); },
   session(el) { ui.sessionId = el.dataset.id; render(); toTop(); },
   'new-hand'() { const h = newHand(session()); ui.handId = h.id; ui.view = 'hand'; render(); },
@@ -943,6 +955,7 @@ const handlers = {
     const s = session();
     s.tableNo = (s.tableNo || 1) + 1;
     s.seatNotes = {};
+    s.seatStacks = {};
     s.heroSeat = null;
     ui.confirmNewTable = false;
     save();
@@ -1040,6 +1053,14 @@ const handlers = {
     if (s.hands.at(-1) === h) {
       h.tourney = tourneySnapshot(s);
       if (h.seats[HERO].stack != null) s.myStack = endStack(h, HERO);
+      // Opponents' stacks after the hand go back to the table, so the next hand starts current.
+      if (h.heroSeat && (h.tableNo || 1) === (s.tableNo || 1)) {
+        const st1 = replay(h);
+        s.seatStacks = s.seatStacks || {};
+        involved(h).forEach((x) => {
+          if (x !== HERO && h.seats[x].stack > 0) s.seatStacks[absSeat(h.heroSeat, x, h.seats.length)] = endStack(h, x, st1);
+        });
+      }
     }
     save(); ui.view = 'review'; render();
   },
@@ -1174,6 +1195,13 @@ root.addEventListener('input', (e) => {
     save();
     return;
   }
+  if (key === 'seat-stack') {
+    const s = session();
+    s.seatStacks = s.seatStacks || {};
+    s.seatStacks[Number(e.target.dataset.k)] = parseStack(v);
+    save();
+    return;
+  }
   if (key === 'notes' || key === 'commentary') { h[key] = v; save(); return; }
   if (key === 'slider') { setRaiseValue(Number(v)); refreshRaise(); return; }
   if (key === 'sb' || key === 'bb') {
@@ -1243,7 +1271,7 @@ root.addEventListener('change', (e) => {
     if (f) restore(f);
     return;
   }
-  if (['stack', 'name', 'seat-note'].includes(e.target.dataset.input)) render();
+  if (['stack', 'name', 'seat-note', 'seat-stack', 't-stack'].includes(e.target.dataset.input) && (ui.view !== 'home' || !ui.sheet)) render();
 });
 
 // Hand sheet: swipe left/right (or drag with the mouse) to move between hands.
