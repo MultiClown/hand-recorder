@@ -33,6 +33,14 @@ if (db.prefsV !== 1) {
   db.prefsV = 1; save();
 }
 db.lastPick = db.lastPick || {};
+// Ben asked (2026-10-26, 8 pm) to clear everything logged while trying the app out. Only
+// workouts started before then are dropped, so nothing real can be lost later.
+if (db.testWipe !== 1) {
+  db.sessions = db.sessions.filter((s) => s.start > 1793070506323);
+  if (!db.sessions.some((s) => s.id === db.activeId)) db.activeId = null;
+  db.timer = null; db.lastPick = {}; db.exPrefs = {}; db.picks = {};
+  db.testWipe = 1; save();
+}
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
 }
