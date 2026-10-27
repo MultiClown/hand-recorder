@@ -25,6 +25,8 @@ if (!('weightKg' in db.profile)) {
   db.profile = { weightKg: 95, age: 32, sex: 'm' };
   save();
 }
+// Equipment defaults now match Ben's real gym; clear ticks made against the old starter list.
+if (db.gymList !== 1) { db.equipment = {}; db.gymList = 1; save(); }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
 }
@@ -544,7 +546,7 @@ const views = {
     const n = allExercises().filter(canDo).length;
     return `<header class="top"><div class="title">My gym</div></header>
     <div class="page">
-      <p class="muted">Untick anything your gym doesn't have. Suggestions only use what's ticked. ${n} exercises available.</p>
+      <p class="muted">This is your gym. Suggestions only use what's ticked. Tick or add anything new. ${n} exercises available.</p>
       <div class="card">
         <b>Add equipment</b>
         <input data-k="newEq" placeholder="What is it? e.g. hack squat, rowing machine" value="${esc(cur().newEq || '')}">
