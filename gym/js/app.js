@@ -27,6 +27,12 @@ if (!('weightKg' in db.profile)) {
 }
 // Equipment defaults now match Ben's real gym; clear ticks made against the old starter list.
 if (db.gymList !== 1) { db.equipment = {}; db.gymList = 1; save(); }
+// Defaults moved to 5 × 12; forget sets/reps saved against the old defaults.
+if (db.prefsV !== 1) {
+  for (const p of Object.values(db.exPrefs)) { delete p.sets; delete p.reps; }
+  db.prefsV = 1; save();
+}
+db.lastPick = db.lastPick || {};
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
 }
@@ -68,18 +74,31 @@ function planFor(splitKey, day) {
   return plan;
 }
 
-// Custom day from chosen muscles: one main lift and one finisher each, abs get two core moves.
-function customPlan(muscles) {
-  const taken = new Set();
-  const plan = [];
-  for (const m of muscles) {
-    const kinds = m === 'abs' ? ['core', 'core'] : ['compound', 'isolation'];
-    for (const kind of kinds) {
-      const x = candidates({ muscles: [m], kind }, taken)[0];
-      if (x) { taken.add(x.id); plan.push({ id: x.id }); }
-    }
-  }
-  return plan;
+// What's ticked when a day opens: what Ben picked last time for that day, else the suggested plan.
+function defaultSelection(day) {
+  const last = (db.lastPick[`${db.settings.split}.${day.key}`] || []).filter((id) => exById(id) && canDo(exById(id)));
+  return last.length ? last : planFor(db.settings.split, day).map((p) => p.id);
+}
+
+const dayMuscles = (day) => day ? [...new Set(day.slots.flatMap((s) => s.muscles))] : Object.keys(MUSCLES);
+const KIND_RANK = { compound: 0, isolation: 1, core: 2 };
+const kindLabel = (x) => ({ compound: 'Main lift', isolation: 'Finisher', core: 'Core' }[x.kind]);
+
+// Workout order: main lifts first, then finishers, then core; muscles in the day's order.
+function orderSelection(ids, day) {
+  const mus = [...dayMuscles(day), ...Object.keys(MUSCLES)];
+  return ids.map(exById).filter(Boolean)
+    .sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || mus.indexOf(a.muscle) - mus.indexOf(b.muscle))
+    .map((x) => x.id);
+}
+
+// Rough lifting time: ~45 s per set (or the hold), plus rest, plus a minute to set up each exercise.
+function estimateMin(ids) {
+  return Math.round(ids.map(exById).reduce((a, x) => {
+    const p = prefsFor(x);
+    const work = x.load === 'time' ? (db.exPrefs[x.id]?.sec || 30) : 45;
+    return a + p.sets * (work + p.rest) / 60 + 1;
+  }, 0));
 }
 
 function nextDay() {
@@ -245,6 +264,34 @@ function tickTimer() {
 }
 setInterval(tickTimer, 250);
 
+function addSet(e, x, st) {
+  st.t = Date.now();
+  e.sets.push(st);
+  save();
+  const prefs = prefsFor(x);
+  if (e.sets.length < prefs.sets) startTimer(prefs.rest, `set ${e.sets.length + 1} of ${prefs.sets} next`);
+  else startTimer(Math.max(prefs.rest, 60), 'next exercise');
+  render();
+}
+
+// Plank-style holds: 5 s to get into position, then count down the target. Lives in memory only.
+let hold = null;
+function finishHold(sec) {
+  const s = db.sessions.find((q) => q.id === hold.sid);
+  const e = s?.ex[hold.exIdx];
+  hold = null;
+  if (!e) { render(); return; }
+  addSet(e, exById(e.id), { sec });
+}
+setInterval(() => {
+  if (!hold) return;
+  const now = Date.now();
+  if (now >= hold.start && !hold.started) { hold.started = true; beep(1); }
+  if (now >= hold.start + hold.target * 1000) { beep(2); navigator.vibrate?.(300); finishHold(hold.target); return; }
+  const el = root.querySelector('[data-live="hold"]');
+  if (el) el.innerHTML = holdInner();
+}, 200);
+
 // Keep the screen on during a workout (where the browser allows it).
 let wakeLock = null;
 async function keepAwake() {
@@ -301,7 +348,7 @@ const views = {
     const s = active();
     const sp = split();
     const day = nextDay();
-    const plan = planFor(db.settings.split, day);
+    const plan = orderSelection(defaultSelection(day), day);
     const wk = db.sessions.filter((x) => x.end && x.start >= weekStart());
     const wkKcal = wk.reduce((a, x) => a + sessionStats(x).total, 0);
     const recent = db.sessions.filter((x) => x.end).slice(-3).reverse();
@@ -321,13 +368,13 @@ const views = {
           <div class="eyebrow">Up next · ${esc(sp.name)}</div>
           <div class="h2">${esc(day.name)} day</div>
           <div class="muted">${esc(day.sub)}</div>
-          <ol class="plan-preview">${plan.map((p) => `<li>${esc(exById(p.id).name)}</li>`).join('')}</ol>
-          <div class="muted small">Starts with 15 min cardio. You can swap any exercise once you're in.</div>
-          <button class="big" data-act="start" data-v="${day.key}">Start ${esc(day.name)} day</button>
+          <ol class="plan-preview">${plan.map((id) => `<li>${esc(exById(id).name)}</li>`).join('')}</ol>
+          <div class="muted small">Next you'll see every option for the day, grouped by muscle, and tick the ones you want.</div>
+          <button class="big" data-act="build" data-v="${day.key}">Start ${esc(day.name)} day</button>
           <div class="other-days">
             <span class="muted small">Or:</span>
-            ${sp.days.filter((d) => d.key !== day.key).map((d) => `<button class="chip" data-act="start" data-v="${d.key}">${esc(d.name)}</button>`).join('')}
-            <button class="chip" data-act="go" data-v="custom">Pick muscles…</button>
+            ${sp.days.filter((d) => d.key !== day.key).map((d) => `<button class="chip" data-act="build" data-v="${d.key}">${esc(d.name)}</button>`).join('')}
+            <button class="chip" data-act="build" data-v="">Build my own…</button>
           </div>
         </div>`}
       <div class="card">
@@ -340,15 +387,29 @@ const views = {
     ${tabs('home')}`;
   },
 
-  custom() {
-    const sel = cur().sel || [];
-    return `${top('Pick muscle groups')}
+  build() {
+    const c = cur();
+    const day = c.day ? dayDef(c.day) : null;
+    if (!c.sel) c.sel = day ? defaultSelection(day) : [];
+    const mine = dayMuscles(day);
+    const others = Object.keys(MUSCLES).filter((m) => !mine.includes(m));
+    const group = (m) => {
+      const list = allExercises().filter((x) => x.muscle === m && canDo(x))
+        .sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind]);
+      if (!list.length) return '';
+      return `<div class="section-h row between"><span>${MUSCLES[m]}</span><span class="muted" data-live="count-${m}">${pickedText(c.sel, m)}</span></div>
+        <div class="card list">${list.map((x) => `
+          <label class="check pick"><input type="checkbox" data-k="pick" data-id="${x.id}" ${c.sel.includes(x.id) ? 'checked' : ''}>
+            <span class="grow"><b>${esc(x.name)}</b><span class="muted small">${kindLabel(x)} · ${esc(x.eq.map((q) => eqName(q).split(' (')[0].split(' / ')[0]).join(' + '))}</span></span></label>`).join('')}
+        </div>`;
+    };
+    return `${top(day ? `${day.name} day` : 'Build a workout', day?.sub || 'Tick any exercises')}
     <div class="page">
-      <p class="muted">Tick what you want to train today. You get one main lift and one finisher per muscle (two core moves for abs).</p>
-      <div class="chips wrap">${Object.entries(MUSCLES).map(([k, v]) =>
-        `<button class="chip lg ${sel.includes(k) ? 'on' : ''}" data-act="custom-toggle" data-v="${k}">${v}</button>`).join('')}</div>
-      <button class="big" data-act="custom-start" ${sel.length ? '' : 'disabled'}>Start workout</button>
-    </div>`;
+      <p class="muted small">${day ? 'Ticked: what you picked last time (or the suggestion). ' : ''}Mix and match within each muscle. The workout runs main lifts first, then finishers, then core.</p>
+      ${mine.map(group).join('')}
+      ${others.length ? `<details class="more"><summary>Other muscles</summary>${others.map(group).join('')}</details>` : ''}
+    </div>
+    <div class="build-bar" data-live="build-bar">${buildBar(c.sel)}</div>`;
   },
 
   session() {
@@ -429,14 +490,16 @@ const views = {
         <div class="muted small">Uses: ${x.eq.map(eqName).map(esc).join(', ')}</div></details>
 
       ${prev ? `<div class="last"><span class="muted small">Last time · ${fmtDate(prev.session.start)}</span><div>${esc(setsSummary(x, prev.entry.sets))}</div>
-        ${sug ? `<div class="sug">${esc(sug.text)}</div>` : ''}</div>` : `<div class="last"><span class="muted small">First time doing this one.</span><div class="sug">Pick a weight you can do ${prefs.reps} times with 2–3 reps left in the tank.</div></div>`}
+        ${sug ? `<div class="sug">${esc(sug.text)}</div>` : ''}</div>` : `<div class="last"><span class="muted small">First time doing this one.</span><div class="sug">${x.load === 'time' ? 'Start with a hold you can keep with good form, around 30 seconds. Stop when your hips sag.'
+          : x.load === 'body' ? `Aim for ${prefs.reps} clean reps. Make it easier or harder as the how-to says.`
+          : `Pick a weight you can do ${prefs.reps} times with 2–3 reps left in the tank.`}</div></div>`}
 
       <div class="logger">
-        ${x.load === 'time' ? field('Seconds', stepper('sec', d.sec, 5, 'lg')) : `
+        ${x.load === 'time' ? holdPanel(d, s, exIdx, n, prefs) : `
           ${x.load === 'weight' ? field(x.eq.includes('dumbbells') ? 'Weight per dumbbell (lb)' : x.bar ? 'Plates (lb)' : 'Weight (lb)', stepper('w', d.w, x.bar ? 2.5 : 5, 'lg')) : ''}
           ${x.bar ? `<label class="bar-toggle"><input type="checkbox" data-k="bar" ${d.bar ? 'checked' : ''}> + bar (${barW} lb) <span class="muted" data-live="bar-total">= ${round1((d.w || 0) + (d.bar ? barW : 0))} lb total</span></label>` : ''}
-          ${field('Reps', stepper('reps', d.reps, 1, 'lg'))}`}
-        <button class="big" data-act="log-set">${n < prefs.sets ? `Log set ${n + 1} of ${prefs.sets}` : `Log extra set (${n + 1})`}</button>
+          ${field('Reps', stepper('reps', d.reps, 1, 'lg'))}
+        <button class="big" data-act="log-set">${setLabel(n, prefs)}</button>`}
       </div>
 
       ${n ? `<div class="sets">${e.sets.map((st, i) => `
@@ -650,6 +713,35 @@ const views = {
 
 // ---------- View pieces ----------
 
+const setLabel = (n, prefs) => n < prefs.sets ? `Log set ${n + 1} of ${prefs.sets}` : `Log extra set (${n + 1})`;
+const pickedText = (sel, m) => { const n = sel.filter((id) => exById(id)?.muscle === m).length; return n ? `${n} picked` : ''; };
+const buildBar = (sel) => {
+  const sets = sel.reduce((a, id) => a + prefsFor(exById(id)).sets, 0);
+  return `<div class="grow"><b>${sel.length} exercise${sel.length === 1 ? '' : 's'}</b><div class="muted small">${sets} sets · about ${estimateMin(sel)} min of lifting</div></div>
+    <button class="btn-sm accent" data-act="build-start" ${sel.length ? '' : 'disabled'}>Start</button>`;
+};
+
+function holdPanel(d, s, exIdx, n, prefs) {
+  if (hold && hold.sid === s.id && hold.exIdx === exIdx) {
+    return `<div class="hold" data-live="hold">${holdInner()}</div>
+      <button class="big stop" data-act="hold-stop">Stop and log</button>
+      <button class="link center" data-act="hold-cancel">Cancel</button>`;
+  }
+  return `${field('Hold for (seconds)', stepper('sec', d.sec, 5, 'lg'))}
+    <button class="big" data-act="hold-start">Start ${setLabel(n, prefs).replace('Log ', '').replace('set', 'hold')} · ${d.sec}s</button>
+    <button class="link center" data-act="log-set">Log ${d.sec}s without the timer</button>`;
+}
+
+function holdInner() {
+  const now = Date.now();
+  if (now < hold.start) return `<div class="muted">Get into position</div><div class="hold-clock">${Math.ceil((hold.start - now) / 1000)}</div><div class="muted small">Hold starts with a beep</div>`;
+  const done = (now - hold.start) / 1000;
+  const left = Math.max(0, Math.ceil(hold.target - done));
+  return `<div class="cyan">Hold!</div><div class="hold-clock">${left}</div>
+    <div class="hold-track"><i style="width:${Math.min(100, (done / hold.target) * 100)}%"></i></div>
+    <div class="muted small">${Math.floor(done)}s of ${hold.target}s</div>`;
+}
+
 const field = (label, inner, note = '') => `<div class="field"><label>${esc(label)}</label>${inner}${note ? `<div class="muted small">${esc(note)}</div>` : ''}</div>`;
 const stepper = (k, v, step, cls = '') => `<div class="stepper ${cls}">
   <button data-act="step" data-k="${k}" data-v="${-step}">−</button>
@@ -755,6 +847,13 @@ function render() {
 // Live numbers that change while typing, without re-rendering (which would close the keyboard).
 function live() {
   const c = cur();
+  if (c.view === 'build') {
+    root.querySelector('[data-live="build-bar"]').innerHTML = buildBar(c.sel);
+    for (const m of Object.keys(MUSCLES)) {
+      const el = root.querySelector(`[data-live="count-${m}"]`);
+      if (el) el.textContent = pickedText(c.sel, m);
+    }
+  }
   if (c.view === 'cardio') {
     const el = root.querySelector('[data-live="cardio-kcal"]');
     if (el) el.textContent = `${cardioKcal(c.draft)} kcal`;
@@ -788,6 +887,11 @@ function setValue(k, raw, el) {
   if (k === 'sound' && c.view === 'settings') { db.settings.sound = v; save(); return; }
   // Gym
   if (k === 'eq') { db.equipment[el.dataset.id] = v; save(); render(); return; }
+  if (k === 'pick') {
+    const id = el.dataset.id;
+    c.sel = v ? [...c.sel.filter((q) => q !== id), id] : c.sel.filter((q) => q !== id);
+    live(); return;
+  }
   if (k === 'newEq') { c.newEq = v; return; }
   if (k === 'bodyWeight') {
     const s = db.sessions.find((q) => q.id === el.dataset.session);
@@ -854,24 +958,40 @@ const actions = {
   tab: (el) => { nav = [{ view: el.dataset.v }]; render(); window.scrollTo(0, 0); },
   go: (el) => go(el.dataset.v, el.dataset.eq ? { eq: el.dataset.eq } : {}),
 
-  start: (el) => {
-    const day = dayDef(el.dataset.v);
-    startSession(day.key, planFor(db.settings.split, day));
+  build: (el) => go('build', { day: el.dataset.v || null }),
+  'build-start': () => {
+    const c = cur();
+    const day = c.day ? dayDef(c.day) : null;
+    const ids = orderSelection(c.sel, day);
+    if (!ids.length) return;
+    if (day) {
+      db.lastPick[`${db.settings.split}.${day.key}`] = ids;
+      startSession(day.key, ids.map((id) => ({ id })));
+    } else {
+      const mus = [...new Set(ids.map((id) => exById(id).muscle))];
+      startSession('custom', ids.map((id) => ({ id })), mus.map((m) => MUSCLES[m]).join(' + '));
+    }
     nav = [{ view: 'home' }, { view: 'session' }];
     render(); window.scrollTo(0, 0);
   },
-  'custom-toggle': (el) => {
-    const c = cur(); c.sel = c.sel || [];
-    const k = el.dataset.v;
-    c.sel = c.sel.includes(k) ? c.sel.filter((q) => q !== k) : [...c.sel, k];
+
+  'hold-start': () => {
+    unlockAudio();
+    const d = cur().draft;
+    if (!(d.sec > 0)) { toast('Set the seconds'); return; }
+    const x = exById(active().ex[cur().exIdx].id);
+    db.exPrefs[x.id] = { ...db.exPrefs[x.id], sec: d.sec };
+    save();
+    hold = { sid: active().id, exIdx: cur().exIdx, start: Date.now() + 5000, target: d.sec, started: false };
     render();
   },
-  'custom-start': () => {
-    const sel = cur().sel || [];
-    startSession('custom', customPlan(sel), sel.map((m) => MUSCLES[m]).join(' + '));
-    nav = [{ view: 'home' }, { view: 'session' }];
-    render(); window.scrollTo(0, 0);
+  'hold-stop': () => {
+    if (!hold) return;
+    const done = Math.floor((Date.now() - hold.start) / 1000);
+    if (done < 1) { hold = null; render(); return; }
+    finishHold(done);
   },
+  'hold-cancel': () => { hold = null; render(); },
 
   finish: () => {
     const s = active();
@@ -883,6 +1003,8 @@ const actions = {
     if (!confirm('Finish this workout?')) return;
     s.end = Date.now();
     s.ex = s.ex.filter((e) => e.sets.length);
+    if (s.day !== 'custom' && s.ex.length) db.lastPick[`${s.split}.${s.day}`] = s.ex.map((e) => e.id);
+    hold = null;
     db.activeId = null; db.timer = null;
     save();
     wakeLock?.release(); wakeLock = null;
@@ -939,13 +1061,7 @@ const actions = {
       st = { w: d.w || 0, reps: d.reps };
       if (x.bar && d.bar) st.bar = db.settings.bars[x.bar];
     }
-    st.t = Date.now();
-    e.sets.push(st);
-    save();
-    const prefs = prefsFor(x);
-    if (e.sets.length < prefs.sets) startTimer(prefs.rest, `set ${e.sets.length + 1} of ${prefs.sets} next`);
-    else startTimer(Math.max(prefs.rest, 60), 'next exercise');
-    render();
+    addSet(e, x, st);
   },
   'set-del': (el) => {
     if (!confirm('Delete this set?')) return;

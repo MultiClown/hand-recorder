@@ -237,11 +237,11 @@ export const EXERCISES = [
     'On one forearm, feet stacked, hips up in a straight line. Log seconds per side.', { load: 'time' }),
 ];
 
-// Default reps / rest per kind. Toning = moderate weight, 10–15 reps, short rest.
+// Default sets / reps / rest per kind. Ben wants 5 × 12 on everything; rest stays short for toning.
 export const DEFAULTS = {
-  compound: { reps: 12, sets: 3, rest: 60 },
-  isolation: { reps: 15, sets: 3, rest: 45 },
-  core: { reps: 15, sets: 3, rest: 30 },
+  compound: { reps: 12, sets: 5, rest: 60 },
+  isolation: { reps: 12, sets: 5, rest: 45 },
+  core: { reps: 12, sets: 5, rest: 30 },
 };
 
 // Training splits. Each day is a list of slots; a slot lists acceptable muscles and the kind wanted.
