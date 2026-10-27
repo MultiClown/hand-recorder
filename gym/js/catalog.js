@@ -133,6 +133,10 @@ export const EXERCISES = [
     'Hips on the pad, ankles locked. Lower your torso slowly, rise until your body is in a straight line. Don\'t over-arch.', { load: 'body' }),
 
   // Rear delts
+  X('archer_pull', 'Archer pull (one-arm cable, like drawing a bow)', 'reardelts', 'isolation', ['cable'],
+    'D-handle on a pulley at shoulder height. Face the pulley, one hand on the handle, and step back until that arm is straight. Pull the handle back past your shoulder with your elbow high and out to the side, like drawing a bow, chest staying square. Squeeze the back of your shoulder, return slowly. Do both sides.'),
+  X('cable_reverse_fly_1arm', 'Single-arm cable reverse fly', 'reardelts', 'isolation', ['cable'],
+    'D-handle on a pulley at shoulder height. Stand side-on to it and take the handle with the far hand, arm across your chest. Keep the arm almost straight and sweep it out and back until it points away from the machine, squeezing behind your armpit. Return slowly. Light weight. Do both sides.'),
   X('face_pull', 'Cable face pull (rope to forehead)', 'reardelts', 'isolation', ['cable'],
     'Rope at face height. Pull toward your forehead, splitting the rope apart, elbows high. Great for posture.'),
   X('reverse_fly', 'Reverse fly on the chest fly machine', 'reardelts', 'isolation', ['pecdeck'],
@@ -258,7 +262,7 @@ export const SPLITS = {
         S(['shoulders'], 'isolation'), S(['chest'], 'isolation'), S(['triceps'], 'isolation'), S(['abs'], 'core')] },
       { key: 'pull', name: 'Pull', sub: 'Back · Biceps · Rear shoulders', slots: [
         S(['back'], 'compound'), S(['back'], 'compound'), S(['back'], 'compound'),
-        S(['reardelts'], 'isolation'), S(['biceps'], 'isolation'), S(['biceps'], 'isolation'), S(['abs'], 'core')] },
+        S(['reardelts'], 'isolation'), S(['reardelts'], 'isolation'), S(['biceps'], 'isolation'), S(['abs'], 'core')] },
       { key: 'legs', name: 'Legs & Core', sub: 'Quads · Hamstrings · Glutes · Abs', slots: [
         S(['quads'], 'compound'), S(['hamstrings'], 'compound'), S(['glutes'], 'compound'),
         S(['quads'], 'isolation'), S(['hamstrings'], 'isolation'), S(['calves'], 'isolation'), S(['abs'], 'core'), S(['abs'], 'core')] },
