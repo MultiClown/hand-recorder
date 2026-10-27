@@ -5,19 +5,26 @@ import { treadmillKcal, ellipticalKcal, metKcal, OTHER_CARDIO, strengthMets } fr
 // Same origin as the poker app (multiclown.github.io), so the key must not clash with hhr.*.
 
 const KEY = 'gym.v1';
+const KG = 0.45359237;
+const round1 = (n) => Math.round(n * 10) / 10;
 function load() {
   try {
     const d = JSON.parse(localStorage.getItem(KEY));
     if (d && d.sessions) return d;
   } catch {}
   return {
-    profile: { weightLb: null, age: null, sex: 'm' },
+    profile: { weightKg: 95, age: 32, sex: 'm' },
     settings: { split: 'ppl', goal: 5, bars: { ...BARS }, ellipticalMax: 20, sound: true },
     equipment: {}, customEquipment: [], customExercises: [],
     picks: {}, exPrefs: {}, sessions: [], activeId: null, timer: null,
   };
 }
 let db = load();
+// Earlier builds kept body weight in lb and asked for it on a welcome screen.
+if (!('weightKg' in db.profile)) {
+  db.profile = { weightKg: 95, age: 32, sex: 'm' };
+  save();
+}
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
 }
@@ -25,7 +32,6 @@ function save() {
 const uid = () => Math.random().toString(36).slice(2, 10);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
-const round1 = (n) => Math.round(n * 10) / 10;
 
 // ---------- Catalog helpers ----------
 
@@ -149,7 +155,7 @@ function suggestion(x, prev, prefs) {
 
 // ---------- Calories ----------
 
-const weight = () => db.profile.weightLb || 170;
+const weight = () => (db.profile.weightKg || 95) / KG; // lb, for calc.js
 
 function cardioKcal(c) {
   if (c.type === 'treadmill') return treadmillKcal(c, weight());
@@ -248,7 +254,7 @@ document.addEventListener('visibilitychange', () => { keepAwake(); tickTimer(); 
 // ---------- Navigation ----------
 
 const root = document.getElementById('app');
-let nav = !db.profile.weightLb ? [{ view: 'welcome' }] : active() ? [{ view: 'home' }, { view: 'session' }] : [{ view: 'home' }];
+let nav = active() ? [{ view: 'home' }, { view: 'session' }] : [{ view: 'home' }];
 const cur = () => nav.at(-1);
 function go(view, params = {}) { nav.push({ view, ...params }); render(); window.scrollTo(0, 0); }
 function back() { if (nav.length > 1) nav.pop(); else nav = [{ view: 'home' }]; render(); window.scrollTo(0, 0); }
@@ -289,19 +295,6 @@ function weekStart(t = Date.now()) {
 }
 
 const views = {
-  welcome() {
-    return `
-    <div class="page">
-      <div class="hero">
-        <div class="logo">▮▬▮</div>
-        <h1>Gym Log</h1>
-        <p class="muted">Track sets, rest between them, and see what each session burned. Three things first, for the calorie maths.</p>
-      </div>
-      ${profileFields()}
-      <button class="big" data-act="welcome-done">Let's go</button>
-    </div>`;
-  },
-
   home() {
     const s = active();
     const sp = split();
@@ -520,7 +513,7 @@ const views = {
       <div class="section-h">Exercises</div>
       ${s.ex.filter((e) => e.sets.length).map((e) => { const x = exById(e.id) || { name: e.id, eq: [], load: 'weight' };
         return `<div class="item"><div class="grow"><b>${esc(x.name)}</b><div class="muted small">${esc(setsSummary(x, e.sets))}</div></div></div>`; }).join('') || '<p class="muted">No sets logged.</p>'}
-      ${field('Body weight today (optional, lb)', `<input inputmode="decimal" data-k="bodyWeight" data-session="${s.id}" value="${s.bodyWeight ?? ''}" placeholder="${db.profile.weightLb ?? ''}">`,
+      ${field('Body weight today (optional, kg)', `<input inputmode="decimal" data-k="bodyWeight" data-session="${s.id}" value="${s.bodyWeight ?? ''}" placeholder="${db.profile.weightKg ?? ''}">`,
         'Updates your profile weight so calorie estimates stay right as you lose weight.')}
       ${fresh ? `<button class="big" data-act="home">Done</button>` : `<button class="btn-ghost full danger" data-act="session-del" data-v="${s.id}">Delete this workout</button>`}
     </div>`;
@@ -639,8 +632,8 @@ const views = {
       </ul>
 
       <h2>Cardio and calories</h2>
-      <p>15 min of incline walking at 12% and 3.2 mph burns roughly 170–200 kcal for most people, about the same as moderate elliptical. Don't hold the rails: it cuts the burn a lot. The weights part of a session usually burns 150–250 kcal more.</p>
-      <p>Fat loss itself comes from eating a bit less than you burn. The gym keeps the weight you lose coming off fat, not muscle. Aim for plenty of protein (roughly 0.7–1 g per lb of goal body weight).</p>
+      <p>15 min of incline walking at 12% and 3.2 mph burns about 220 kcal at 95 kg, a bit more than moderate elliptical. Don't hold the rails: it cuts the burn a lot. The weights part of a session usually burns 150–250 kcal more.</p>
+      <p>Fat loss itself comes from eating a bit less than you burn. The gym keeps the weight you lose coming off fat, not muscle. Aim for plenty of protein (roughly 1.6–2 g per kg of goal body weight, so 130–170 g a day for you).</p>
 
       <h2>How calories are worked out</h2>
       <ul>
@@ -669,7 +662,7 @@ function profileFields() {
   const p = db.profile;
   return `<div class="card">
     <div class="plan-grid">
-      ${field('Body weight (lb)', `<input inputmode="decimal" data-k="weightLb" value="${p.weightLb ?? ''}" placeholder="e.g. 180">`)}
+      ${field('Body weight (kg)', `<input inputmode="decimal" data-k="weightKg" value="${p.weightKg ?? ''}" placeholder="e.g. 95">`)}
       ${field('Age', `<input inputmode="numeric" data-k="age" value="${p.age ?? ''}" placeholder="e.g. 32">`)}
     </div>
     ${field('Sex (for heart-rate calories)', chips('sex', ['m', 'f'], p.sex, (v) => (v === 'm' ? 'Male' : 'Female')))}
@@ -745,7 +738,7 @@ function weightTrend() {
   const ws = pts.map((p) => p.w), lo = Math.min(...ws), hi = Math.max(...ws), span = hi - lo || 1;
   const path = pts.map((p, i) => `${(i / (pts.length - 1)) * 300},${70 - ((p.w - lo) / span) * 60}`).join(' ');
   return `<div class="section-h">Body weight</div><div class="card">
-    <div class="row between"><b>${last.w} lb</b><span class="${diff <= 0 ? 'good' : 'bad'}">${diff > 0 ? '+' : ''}${diff} lb since ${fmtDate(first.t)}</span></div>
+    <div class="row between"><b>${last.w} kg</b><span class="${diff <= 0 ? 'good' : 'bad'}">${diff > 0 ? '+' : ''}${diff} kg since ${fmtDate(first.t)}</span></div>
     <svg viewBox="-4 0 308 76" class="spark"><polyline points="${path}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/></svg></div>`;
 }
 
@@ -784,7 +777,7 @@ function setValue(k, raw, el) {
   const c = cur();
   const v = el?.type === 'checkbox' ? el.checked : raw;
   // Profile
-  if (['weightLb', 'age'].includes(k)) { db.profile[k] = num(v); save(); return; }
+  if (['weightKg', 'age'].includes(k)) { db.profile[k] = num(v); save(); return; }
   if (k === 'sex') { db.profile.sex = v; save(); render(); return; }
   // Settings
   if (k.startsWith('bar-') && c.view === 'settings') { const n = num(v); if (n != null) db.settings.bars[k.slice(4)] = n; save(); return; }
@@ -797,7 +790,7 @@ function setValue(k, raw, el) {
   if (k === 'bodyWeight') {
     const s = db.sessions.find((q) => q.id === el.dataset.session);
     s.bodyWeight = num(v);
-    if (s.bodyWeight && s === db.sessions.filter((q) => q.bodyWeight).at(-1)) db.profile.weightLb = s.bodyWeight;
+    if (s.bodyWeight && s === db.sessions.filter((q) => q.bodyWeight).at(-1)) db.profile.weightKg = s.bodyWeight;
     save(); return;
   }
   // Exercise plan prefs
@@ -858,11 +851,6 @@ const actions = {
   back, home,
   tab: (el) => { nav = [{ view: el.dataset.v }]; render(); window.scrollTo(0, 0); },
   go: (el) => go(el.dataset.v, el.dataset.eq ? { eq: el.dataset.eq } : {}),
-
-  'welcome-done': () => {
-    if (!db.profile.weightLb) { toast('Add your body weight first'); return; }
-    save(); home();
-  },
 
   start: (el) => {
     const day = dayDef(el.dataset.v);
@@ -1051,7 +1039,7 @@ async function restore(file) {
     db.equipment = { ...d.equipment, ...db.equipment };
     db.picks = { ...d.picks, ...db.picks };
     db.exPrefs = { ...d.exPrefs, ...db.exPrefs };
-    if (!db.profile.weightLb && d.profile) db.profile = d.profile;
+    
     save(); render();
     toast(`Restored ${added.length} workouts`);
   } catch { toast("That file isn't a Gym Log backup"); }
