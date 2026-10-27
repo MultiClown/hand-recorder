@@ -741,8 +741,8 @@ function holdPanel(d, s, exIdx, n, prefs) {
       <button class="link center" data-act="hold-cancel">Cancel</button>`;
   }
   return `${field('Hold for (seconds)', stepper('sec', d.sec, 5, 'lg'))}
-    <button class="big" data-act="hold-start">Start ${setLabel(n, prefs).replace('Log ', '').replace('set', 'hold')} · ${d.sec}s</button>
-    <button class="link center" data-act="log-set">Log ${d.sec}s without the timer</button>`;
+    <button class="big" data-act="hold-start">Start ${setLabel(n, prefs).replace('Log ', '').replace('set', 'hold')} · <span data-live="sec">${d.sec}</span>s</button>
+    <button class="link center" data-act="log-set">Log <span data-live="sec">${d.sec}</span>s without the timer</button>`;
 }
 
 function holdInner() {
@@ -875,6 +875,7 @@ function live() {
     const el = root.querySelector('[data-live="bar-total"]');
     const x = exById(active().ex[c.exIdx].id);
     if (el) el.textContent = `= ${round1((c.draft.w || 0) + (c.draft.bar ? db.settings.bars[x.bar] : 0))} lb total`;
+    for (const s of root.querySelectorAll('[data-live="sec"]')) s.textContent = c.draft.sec ?? '';
   }
 }
 setInterval(() => {
