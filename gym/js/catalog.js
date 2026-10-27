@@ -261,7 +261,7 @@ export const SPLITS = {
         S(['chest'], 'compound'), S(['shoulders'], 'compound'), S(['chest'], 'compound'),
         S(['shoulders'], 'isolation'), S(['chest'], 'isolation'), S(['triceps'], 'isolation'), S(['abs'], 'core')] },
       { key: 'pull', name: 'Pull', sub: 'Back · Biceps · Rear shoulders', slots: [
-        S(['back'], 'compound'), S(['back'], 'compound'), S(['back'], 'compound'),
+        S(['back'], 'compound'), S(['back'], 'compound'), S(['back'], 'isolation'),
         S(['reardelts'], 'isolation'), S(['reardelts'], 'isolation'), S(['biceps'], 'isolation'), S(['biceps'], 'isolation'), S(['abs'], 'core')] },
       { key: 'legs', name: 'Legs & Core', sub: 'Quads · Hamstrings · Glutes · Abs', slots: [
         S(['quads'], 'compound'), S(['hamstrings'], 'compound'), S(['glutes'], 'compound'),

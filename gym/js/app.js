@@ -41,11 +41,11 @@ if (db.testWipe !== 1) {
   db.timer = null; db.lastPick = {}; db.exPrefs = {}; db.picks = {};
   db.testWipe = 1; save();
 }
-// Pull day gained a second rear-delt slot (and kept both curls): start it fresh so the new picks show ticked.
-if (db.rearV !== 2) {
+// Pull day changed (second rear-delt slot, both curls, straight-arm pulldown for the Smith row): start it fresh so the new picks show ticked.
+if (db.rearV !== 3) {
   delete db.lastPick['ppl.pull'];
   for (const k of Object.keys(db.picks)) if (k.startsWith('ppl.pull.')) delete db.picks[k];
-  db.rearV = 2; save();
+  db.rearV = 3; save();
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {}
