@@ -393,19 +393,24 @@ const views = {
     if (!c.sel) c.sel = day ? defaultSelection(day) : [];
     const mine = dayMuscles(day);
     const others = Object.keys(MUSCLES).filter((m) => !mine.includes(m));
+    const rec = new Set(day ? planFor(db.settings.split, day).map((p) => p.id) : []);
     const group = (m) => {
       const list = allExercises().filter((x) => x.muscle === m && canDo(x))
         .sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind]);
       if (!list.length) return '';
       return `<div class="section-h row between"><span>${MUSCLES[m]}</span><span class="muted" data-live="count-${m}">${pickedText(c.sel, m)}</span></div>
         <div class="card list">${list.map((x) => `
-          <label class="check pick"><input type="checkbox" data-k="pick" data-id="${x.id}" ${c.sel.includes(x.id) ? 'checked' : ''}>
-            <span class="grow"><b>${esc(x.name)}</b><span class="muted small">${kindLabel(x)} · ${esc(x.eq.map((q) => eqName(q).split(' (')[0].split(' / ')[0]).join(' + '))}</span></span></label>`).join('')}
+          <div class="pick-row">
+            <label class="check pick"><input type="checkbox" data-k="pick" data-id="${x.id}" ${c.sel.includes(x.id) ? 'checked' : ''}>
+              <span class="grow"><b>${rec.has(x.id) ? '<span class="star" title="Recommended">★</span> ' : ''}${esc(x.name)}</b><span class="muted small">${kindLabel(x)} · ${esc(x.eq.map((q) => eqName(q).split(' (')[0].split(' / ')[0]).join(' + '))}</span></span></label>
+            <button class="info" data-act="info" data-v="${x.id}" aria-label="What is this?">?</button>
+          </div>
+          <div class="pick-how" data-how="${x.id}" hidden>${esc(x.how)}<div class="muted small">You need: ${esc(x.eq.map(eqName).join(', '))}. ${x.eq.every(hasEq) ? 'Your gym has it.' : ''}</div></div>`).join('')}
         </div>`;
     };
     return `${top(day ? `${day.name} day` : 'Build a workout', day?.sub || 'Tick any exercises')}
     <div class="page">
-      <p class="muted small">${day ? 'Ticked: what you picked last time (or the suggestion). ' : ''}Mix and match within each muscle. The workout runs main lifts first, then finishers, then core.</p>
+      <p class="muted small">${day ? '<span class="star">★</span> = recommended for this day. Ticked = what you did last time (the ★ ones the first time). ' : ''}Tap <b>?</b> to see what an exercise is. The workout runs main lifts first, then finishers, then core.</p>
       ${mine.map(group).join('')}
       ${others.length ? `<details class="more"><summary>Other muscles</summary>${others.map(group).join('')}</details>` : ''}
     </div>
@@ -992,6 +997,11 @@ const actions = {
     finishHold(done);
   },
   'hold-cancel': () => { hold = null; render(); },
+  info: (el) => {
+    const box = root.querySelector(`[data-how="${el.dataset.v}"]`);
+    box.hidden = !box.hidden;
+    el.classList.toggle('on', !box.hidden);
+  },
 
   finish: () => {
     const s = active();

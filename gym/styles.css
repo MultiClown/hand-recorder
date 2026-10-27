@@ -141,7 +141,14 @@ h2 { font-size: 19px; margin: 22px 0 8px; }
 .done-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 12px 14px; border-radius: 14px; background: rgba(74, 222, 128, .1); border: 1px solid rgba(74, 222, 128, .35); color: var(--good); font-weight: 650; }
 
 /* Workout builder */
-.check.pick { align-items: flex-start; }
+.check.pick { align-items: flex-start; flex: 1; border-bottom: 0; }
+.pick-row { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.card.list > .pick-row:nth-last-child(2) { border-bottom: 0; }
+.info { width: 32px; height: 32px; border-radius: 50%; background: var(--panel2); border: 1px solid var(--line); color: var(--cyan); font-weight: 700; flex-shrink: 0; text-align: center; }
+.info.on { background: var(--cyan); color: #120f1a; }
+.pick-how { font-size: 14px; color: #d9d4e2; background: var(--panel2); border-radius: 10px; padding: 10px 12px; margin: 2px 0 10px; }
+.pick-how .muted { margin-top: 6px; }
+.star { color: #fbbf24; }
 .check.pick b { display: block; font-weight: 600; }
 .more summary { margin-top: 14px; color: var(--cyan); font-weight: 600; cursor: pointer; }
 .build-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: 100%; max-width: 460px; display: flex; align-items: center; gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: rgba(24, 21, 31, .97); border-top: 1px solid var(--line); z-index: 6; }
