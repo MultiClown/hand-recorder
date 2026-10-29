@@ -33,6 +33,7 @@ if (db.prefsV !== 1) {
   db.prefsV = 1; save();
 }
 db.lastPick = db.lastPick || {};
+db.dayPlans = db.dayPlans || {};
 // Ben asked (2026-10-26, 8 pm) to clear everything logged while trying the app out. Only
 // workouts started before then are dropped, so nothing real can be lost later.
 if (db.testWipe !== 1) {
@@ -88,9 +89,13 @@ function planFor(splitKey, day) {
   return plan;
 }
 
-// What's ticked when a day opens: what Ben picked last time for that day, else the suggested plan.
+// What's ticked when a day opens: the plan Ben saved for that day, else what he did last time, else the suggestion.
+const usable = (ids) => (ids || []).filter((id) => exById(id) && canDo(exById(id)));
+const savedPlan = (day) => usable(db.dayPlans[`${db.settings.split}.${day.key}`]);
 function defaultSelection(day) {
-  const last = (db.lastPick[`${db.settings.split}.${day.key}`] || []).filter((id) => exById(id) && canDo(exById(id)));
+  const saved = savedPlan(day);
+  if (saved.length) return saved;
+  const last = usable(db.lastPick[`${db.settings.split}.${day.key}`]);
   return last.length ? last : planFor(db.settings.split, day).map((p) => p.id);
 }
 
@@ -385,6 +390,7 @@ const views = {
           <ol class="plan-preview">${plan.map((id) => `<li>${esc(exById(id).name)}</li>`).join('')}</ol>
           <div class="muted small">Next you'll see every option for the day, grouped by muscle, and tick the ones you want.</div>
           <button class="big" data-act="build" data-v="${day.key}">Start ${esc(day.name)} day</button>
+          <button class="link center" data-act="plan-day" data-v="${day.key}">Set up my days</button>
           <div class="other-days">
             <span class="muted small">Or:</span>
             ${sp.days.filter((d) => d.key !== day.key).map((d) => `<button class="chip" data-act="build" data-v="${d.key}">${esc(d.name)}</button>`).join('')}
@@ -405,6 +411,7 @@ const views = {
     const c = cur();
     const day = c.day ? dayDef(c.day) : null;
     if (!c.sel) c.sel = day ? defaultSelection(day) : [];
+    const saved = day && savedPlan(day).length;
     const mine = dayMuscles(day);
     const others = Object.keys(MUSCLES).filter((m) => !mine.includes(m));
     const rec = new Set(day ? planFor(db.settings.split, day).map((p) => p.id) : []);
@@ -422,13 +429,16 @@ const views = {
           <div class="pick-how" data-how="${x.id}" hidden>${esc(x.how)}<div class="muted small">You need: ${esc(x.eq.map(eqName).join(', '))}. ${x.eq.every(hasEq) ? 'Your gym has it.' : ''}</div></div>`).join('')}
         </div>`;
     };
-    return `${top(day ? `${day.name} day` : 'Build a workout', day?.sub || 'Tick any exercises')}
+    const days = split().days;
+    return `${top(day ? `${c.plan ? 'Set up · ' : ''}${day.name} day` : 'Build a workout', day?.sub || 'Tick any exercises')}
     <div class="page">
-      <p class="muted small">${day ? '<span class="star">★</span> = recommended for this day. Ticked = what you did last time (the ★ ones the first time). ' : ''}Tap <b>?</b> to see what an exercise is. The workout runs main lifts first, then finishers, then core.</p>
+      ${c.plan ? `<div class="chips wrap plan-tabs">${days.map((d) => `<button class="chip ${d.key === day.key ? 'on' : ''}" data-act="plan-day" data-v="${d.key}">${esc(d.name)}${savedPlan(d).length ? ' ✓' : ''}</button>`).join('')}</div>
+        <p class="muted small">Tick what this day should be. Save it and it's ticked every time you start ${esc(day.name)} day. You can still change it on the day.${saved ? ' <button class="link" data-act="plan-reset">Go back to the suggestion</button>' : ''}</p>` : ''}
+      <p class="muted small">${day ? `<span class="star">★</span> = recommended for this day. Ticked = ${saved ? 'your saved plan' : 'what you did last time (the ★ ones the first time)'}. ` : ''}Tap <b>?</b> to see what an exercise is. The workout runs main lifts first, then finishers, then core.</p>
       ${mine.map(group).join('')}
       ${others.length ? `<details class="more"><summary>Other muscles</summary>${others.map(group).join('')}</details>` : ''}
     </div>
-    <div class="build-bar" data-live="build-bar">${buildBar(c.sel)}</div>`;
+    <div class="build-bar" data-live="build-bar">${buildBar(c.sel, c.plan)}</div>`;
   },
 
   session() {
@@ -676,6 +686,14 @@ const views = {
           <div class="row between"><b>${esc(sp.name)}</b>${k === 'ppl' ? '<span class="badge">Recommended</span>' : ''}</div>
           <div class="muted small">${esc(sp.blurb)}</div></button>`).join('')}
       ${field('Weekly goal', stepper('s-goal', db.settings.goal, 1))}
+      <div class="section-h">My days</div>
+      <div class="card list">${split().days.map((d) => {
+        const ids = orderSelection(defaultSelection(d), d);
+        return `<button class="row-btn" data-act="plan-day" data-v="${d.key}">
+          <span class="grow"><b>${esc(d.name)} day</b><span class="muted small">${savedPlan(d).length ? 'Your plan' : 'Suggested'} · ${ids.length} exercises · about ${estimateMin(ids)} min<br>${esc(ids.map((id) => exById(id).name.split(' (')[0]).join(', '))}</span></span>
+          <span class="muted">›</span></button>`;
+      }).join('')}</div>
+      <div class="muted small">Set up what each day does before you get to the gym.</div>
       <div class="section-h">Equipment details</div>
       <div class="plan-grid">
         ${field('Smith bar (lb)', `<input inputmode="decimal" data-k="bar-smith" value="${db.settings.bars.smith}">`)}
@@ -734,10 +752,10 @@ const views = {
 
 const setLabel = (n, prefs) => n < prefs.sets ? `Log set ${n + 1} of ${prefs.sets}` : `Log extra set (${n + 1})`;
 const pickedText = (sel, m) => { const n = sel.filter((id) => exById(id)?.muscle === m).length; return n ? `${n} picked` : ''; };
-const buildBar = (sel) => {
+const buildBar = (sel, plan) => {
   const sets = sel.reduce((a, id) => a + prefsFor(exById(id)).sets, 0);
   return `<div class="grow"><b>${sel.length} exercise${sel.length === 1 ? '' : 's'}</b><div class="muted small">${sets} sets · about ${estimateMin(sel)} min of lifting</div></div>
-    <button class="btn-sm accent" data-act="build-start" ${sel.length ? '' : 'disabled'}>Start</button>`;
+    <button class="btn-sm accent" data-act="${plan ? 'plan-save' : 'build-start'}" ${sel.length ? '' : 'disabled'}>${plan ? 'Save' : 'Start'}</button>`;
 };
 
 function holdPanel(d, s, exIdx, n, prefs) {
@@ -867,7 +885,7 @@ function render() {
 function live() {
   const c = cur();
   if (c.view === 'build') {
-    root.querySelector('[data-live="build-bar"]').innerHTML = buildBar(c.sel);
+    root.querySelector('[data-live="build-bar"]').innerHTML = buildBar(c.sel, c.plan);
     for (const m of Object.keys(MUSCLES)) {
       const el = root.querySelector(`[data-live="count-${m}"]`);
       if (el) el.textContent = pickedText(c.sel, m);
@@ -979,6 +997,24 @@ const actions = {
   go: (el) => go(el.dataset.v, el.dataset.eq ? { eq: el.dataset.eq } : {}),
 
   build: (el) => go('build', { day: el.dataset.v || null }),
+  'plan-day': (el) => {
+    const c = cur();
+    if (c.view === 'build' && c.plan) { Object.assign(c, { day: el.dataset.v, sel: null }); render(); window.scrollTo(0, 0); return; }
+    go('build', { day: el.dataset.v, plan: true });
+  },
+  'plan-save': () => {
+    const c = cur();
+    const day = dayDef(c.day);
+    db.dayPlans[`${db.settings.split}.${day.key}`] = orderSelection(c.sel, day);
+    save(); render(); toast(`Saved your ${day.name} day`);
+  },
+  'plan-reset': () => {
+    const c = cur();
+    const day = dayDef(c.day);
+    delete db.dayPlans[`${db.settings.split}.${day.key}`];
+    delete db.lastPick[`${db.settings.split}.${day.key}`];
+    c.sel = null; save(); render(); toast('Back to the suggested plan');
+  },
   'build-start': () => {
     const c = cur();
     const day = c.day ? dayDef(c.day) : null;
