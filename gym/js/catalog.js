@@ -185,6 +185,8 @@ export const EXERCISES = [
     'Same hip hinge as the Smith version with dumbbells in front of your thighs.'),
   X('leg_curl', 'Leg curl', 'hamstrings', 'isolation', ['legcurl'],
     'Pad just above your heels. Curl your heels toward you, squeeze, return slowly.'),
+  X('cable_ham_curl', 'Standing cable hamstring curl', 'hamstrings', 'isolation', ['cable'],
+    'Ankle strap on the lowest pulley, around one ankle. Face the machine and hold the frame. Knees side by side, curl your heel up toward your bum, squeeze the back of your thigh, lower slowly. Don\'t let the knee drift forward or swing your hips. Light weight. Do both sides.'),
 
   X('trx_ham_curl', 'TRX hamstring curl', 'hamstrings', 'isolation', ['trx'],
     'Straps lowered to about a foot off the floor. Lie on your back, heels in the foot cradles. Lift your hips off the floor, then pull your heels toward your bum, keeping hips up. Straighten slowly.', { load: 'body' }),
