@@ -153,6 +153,18 @@ function startClock(s, t = Date.now()) {
   s.clock = true;
 }
 
+// Drop the open workout and everything logged in it (after asking).
+function discardActive(msg) {
+  const s = active();
+  if (!s) return false;
+  const sets = s.ex.reduce((a, e) => a + e.sets.length, 0);
+  if (!confirm(msg || (sets || s.cardio.length ? `Delete this workout? The ${sets} sets${s.cardio.length ? ' and cardio' : ''} logged in it go too.` : 'Delete this workout?'))) return false;
+  db.sessions = db.sessions.filter((q) => q !== s);
+  db.activeId = null; db.timer = null; hold = null;
+  save(); home();
+  return true;
+}
+
 function startSession(day, plan, customName) {
   const s = {
     id: uid(), start: Date.now(), clock: false, end: null, split: db.settings.split, day, customName,
@@ -394,12 +406,15 @@ const views = {
       <div class="row between"><h1>${new Date().toLocaleDateString(undefined, { weekday: 'long' })}</h1>
         <button class="link" data-act="go" data-v="guide">How this works</button></div>
       ${s ? `
+        <div class="swipe" data-swipe>
+        <div class="swipe-under"><span>Delete</span><span>Delete</span></div>
         <button class="card resume" data-act="go" data-v="session">
           <div class="eyebrow">${clockOn(s) ? 'Workout in progress' : "Today's plan"}</div>
           <div class="h2">${esc(sessionDayName(s))}</div>
           <div class="muted">${clockOn(s) ? `Started ${fmtTime(s.start)} · ${fmtMin(sessionStats(s).gymMin)}` : 'Planned · clock not started'}</div>
           <div class="cta">Resume →</div>
-        </button>` : `
+        </button></div>
+        <button class="link center" data-act="discard">Delete this workout</button>` : `
         <div class="card up-next">
           <div class="eyebrow">Up next · ${esc(sp.name)}</div>
           <div class="h2">${esc(day.name)} day</div>
@@ -1094,13 +1109,11 @@ const actions = {
     el.classList.toggle('on', !box.hidden);
   },
 
+  discard: () => { discardActive(); },
   finish: () => {
     const s = active();
     const sets = s.ex.reduce((a, e) => a + e.sets.length, 0);
-    if (!sets && !s.cardio.length) {
-      if (confirm('Nothing logged. Discard this workout?')) { db.sessions = db.sessions.filter((q) => q !== s); db.activeId = null; db.timer = null; save(); home(); }
-      return;
-    }
+    if (!sets && !s.cardio.length) { discardActive('Nothing logged. Discard this workout?'); return; }
     if (!confirm('Finish this workout?')) return;
     s.end = Date.now();
     s.ex = s.ex.filter((e) => e.sets.length);
@@ -1269,8 +1282,34 @@ async function restore(file) {
   } catch { toast("That file isn't a Gym Log backup"); }
 }
 
+// Swipe the workout card on the home screen sideways (either way) to delete it.
+let swipe = null;
+root.addEventListener('touchstart', (e) => {
+  const card = e.target.closest('[data-swipe] .resume');
+  swipe = card ? { card, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, on: false } : null;
+}, { passive: true });
+root.addEventListener('touchmove', (e) => {
+  if (!swipe) return;
+  const dx = e.touches[0].clientX - swipe.x, dy = e.touches[0].clientY - swipe.y;
+  if (!swipe.on && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; }
+  if (Math.abs(dx) > 8) swipe.on = true;
+  swipe.dx = dx;
+  swipe.card.style.transition = 'none';
+  swipe.card.style.transform = `translateX(${dx}px)`;
+}, { passive: true });
+root.addEventListener('touchend', () => {
+  if (!swipe) return;
+  const { card, dx, on } = swipe;
+  swipe = null;
+  card.style.transition = 'transform .2s';
+  if (on) { card.dataset.swiped = '1'; setTimeout(() => delete card.dataset.swiped, 400); }
+  if (Math.abs(dx) > 110 && discardActive()) return;
+  card.style.transform = '';
+});
+
 document.addEventListener('click', (e) => {
   unlockAudio();
+  if (e.target.closest('[data-swiped]')) { e.preventDefault(); return; }
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const fn = actions[el.dataset.act];
