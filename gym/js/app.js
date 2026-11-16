@@ -84,7 +84,7 @@ function candidates(slot, taken) {
   return exact.length ? [...exact, ...pool.filter((x) => x.kind !== slot.kind)] : pool;
 }
 
-// Fill each slot of a day from what the gym has. A swap is remembered for next time.
+// Fill each slot of a day from what the gym has (db.picks holds older remembered swaps).
 function planFor(splitKey, day) {
   const taken = new Set();
   const plan = [];
@@ -151,6 +151,17 @@ const clockOn = (s) => s.clock !== false;
 function startClock(s, t = Date.now()) {
   if (!clockOn(s) || t < s.start) s.start = Math.min(t, Date.now());
   s.clock = true;
+}
+
+// Take an exercise off today's workout only. Saved day plans and suggestions don't change.
+function removeEx(i) {
+  const s = active();
+  const e = s?.ex[i];
+  if (!e) return false;
+  if (e.sets.length && !confirm(`Remove ${exById(e.id)?.name || 'this exercise'} and its ${e.sets.length} logged sets?`)) return false;
+  s.ex.splice(i, 1);
+  save(); render();
+  return true;
 }
 
 // Drop the open workout and everything logged in it (after asking).
@@ -406,9 +417,9 @@ const views = {
       <div class="row between"><h1>${new Date().toLocaleDateString(undefined, { weekday: 'long' })}</h1>
         <button class="link" data-act="go" data-v="guide">How this works</button></div>
       ${s ? `
-        <div class="swipe" data-swipe>
+        <div class="swipe" data-swipe="workout">
         <div class="swipe-under"><span>Delete</span><span>Delete</span></div>
-        <button class="card resume" data-act="go" data-v="session">
+        <button class="card resume swipe-card" data-act="go" data-v="session">
           <div class="eyebrow">${clockOn(s) ? 'Workout in progress' : "Today's plan"}</div>
           <div class="h2">${esc(sessionDayName(s))}</div>
           <div class="muted">${clockOn(s) ? `Started ${fmtTime(s.start)} · ${fmtMin(sessionStats(s).gymMin)}` : 'Planned · clock not started'}</div>
@@ -618,7 +629,7 @@ const views = {
     const list = candidates(slot, taken);
     return `${top('Swap exercise', x.name)}
     <div class="page">
-      <p class="muted">Same muscle, using what your gym has. Your pick is remembered for next ${esc(day?.name || '')} day.</p>
+      <p class="muted">Same muscle, using what your gym has. Only changes today's workout. To change the day itself, use Settings → My days.</p>
       ${list.length ? list.map((q) => `<button class="item" data-act="swap-pick" data-v="${q.id}">
         <div class="grow"><b>${esc(q.name)}</b><div class="muted small">${esc(q.how.split('. ')[0])}.</div></div><span>→</span></button>`).join('')
         : '<p class="muted">Nothing else in your gym works this muscle. Add equipment under My gym.</p>'}
@@ -855,14 +866,15 @@ function exRow(s, e, i) {
   const prev = lastTime(x.id, s);
   const n = e.sets.length;
   const done = n >= prefs.sets;
-  return `<div class="item ex ${done ? 'done' : ''}">
+  return `<div class="swipe" data-swipe="ex" data-v="${i}"><div class="swipe-under"><span>Remove</span><span>Remove</span></div>
+  <div class="item ex swipe-card ${done ? 'done' : ''}">
     <button class="grow tap" data-act="open-ex" data-v="${i}">
       <b>${esc(x.name)}</b>
       <div class="muted small">${MUSCLES[x.muscle]} · ${x.load === 'time' ? `${prefs.sets} holds` : `${prefs.sets} × ${prefs.reps}`}${prev ? ` · last ${esc(setsSummary(x, prev.entry.sets))}` : ''}</div>
     </button>
     <span class="prog ${done ? 'ok' : ''}">${done ? '✓' : `${n}/${prefs.sets}`}</span>
     ${n ? '' : `<button class="x" data-act="swap" data-v="${i}" aria-label="Swap">⇄</button><button class="x" data-act="ex-del" data-v="${i}" aria-label="Remove">✕</button>`}
-  </div>`;
+  </div></div>`;
 }
 
 function cardioTitle(c) {
@@ -1117,7 +1129,6 @@ const actions = {
     if (!confirm('Finish this workout?')) return;
     s.end = Date.now();
     s.ex = s.ex.filter((e) => e.sets.length);
-    if (s.day !== 'custom' && s.ex.length) db.lastPick[`${s.split}.${s.day}`] = s.ex.map((e) => e.id);
     hold = null;
     db.activeId = null; db.timer = null;
     save();
@@ -1145,12 +1156,11 @@ const actions = {
     if (cur().view === 'exercise') nav.pop();
     go('exercise', { exIdx: i });
   },
-  'ex-del': (el) => { active().ex.splice(+el.dataset.v, 1); save(); render(); },
+  'ex-del': (el) => { removeEx(+el.dataset.v); },
   swap: (el) => go('swap', { exIdx: +el.dataset.v }),
   'swap-pick': (el) => {
     const s = active();
     const e = s.ex[cur().exIdx];
-    if (e.slot != null && s.day !== 'custom') db.picks[`${s.split}.${s.day}.${e.slot}`] = el.dataset.v;
     e.id = el.dataset.v;
     save(); back();
   },
@@ -1282,11 +1292,11 @@ async function restore(file) {
   } catch { toast("That file isn't a Gym Log backup"); }
 }
 
-// Swipe the workout card on the home screen sideways (either way) to delete it.
+// Swipe sideways (either way) on the home workout card to delete it, or on an exercise row to take it off today.
 let swipe = null;
 root.addEventListener('touchstart', (e) => {
-  const card = e.target.closest('[data-swipe] .resume');
-  swipe = card ? { card, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, on: false } : null;
+  const card = e.target.closest('[data-swipe] > .swipe-card');
+  swipe = card ? { card, box: card.parentElement, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, on: false } : null;
 }, { passive: true });
 root.addEventListener('touchmove', (e) => {
   if (!swipe) return;
@@ -1299,11 +1309,11 @@ root.addEventListener('touchmove', (e) => {
 }, { passive: true });
 root.addEventListener('touchend', () => {
   if (!swipe) return;
-  const { card, dx, on } = swipe;
+  const { card, box, dx, on } = swipe;
   swipe = null;
   card.style.transition = 'transform .2s';
   if (on) { card.dataset.swiped = '1'; setTimeout(() => delete card.dataset.swiped, 400); }
-  if (Math.abs(dx) > 110 && discardActive()) return;
+  if (Math.abs(dx) > 110 && (box.dataset.swipe === 'ex' ? removeEx(+box.dataset.v) : discardActive())) return;
   card.style.transform = '';
 });
 

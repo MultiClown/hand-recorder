@@ -62,7 +62,10 @@ h2 { font-size: 19px; margin: 22px 0 8px; }
 .card.list > * + * { margin-top: 0; }
 .resume { border-color: var(--purple); background: linear-gradient(140deg, rgba(177, 91, 241, .18), rgba(84, 226, 239, .08)); }
 .swipe { position: relative; border-radius: 16px; overflow: hidden; }
-.swipe .resume { position: relative; z-index: 1; width: 100%; margin: 0; background-color: var(--bg); }
+.swipe .swipe-card { position: relative; z-index: 1; width: 100%; margin: 0; background-color: var(--bg); }
+.swipe .item.swipe-card { background-color: var(--panel); }
+.swipe:has(> .item) { border-radius: 14px; }
+.swipe:has(> .item) .swipe-under { border-radius: 14px; font-size: 14px; }
 .swipe-under { position: absolute; inset: 0; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; background: #b3263b; color: #fff; font-weight: 700; border-radius: 16px; }
 .resume .cta { color: var(--cyan); font-weight: 600; margin-top: 8px; }
 .up-next .big { margin-top: 12px; }
