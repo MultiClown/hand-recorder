@@ -125,6 +125,10 @@ h2 { font-size: 19px; margin: 22px 0 8px; }
 .stats3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stats3 > div { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px; text-align: center; }
 .stats3 b { display: block; font-size: 20px; }
+.stats3 > .clock-box { background: var(--panel); border: 1px solid var(--cyan); border-radius: 14px; padding: 10px; text-align: center; }
+.clock-box.off b { color: var(--cyan); }
+.clock-panel { margin-top: 10px; }
+.clock-panel .muted { margin: 6px 0 10px; }
 .stats3 span { font-size: 12px; color: var(--dim); }
 .stats3.lg b { font-size: 21px; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .estimate { display: flex; justify-content: space-between; align-items: center; padding: 14px; border-radius: 14px; background: rgba(84, 226, 239, .08); border: 1px solid rgba(84, 226, 239, .3); }

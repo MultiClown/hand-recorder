@@ -145,9 +145,17 @@ function prefsFor(x) {
   return { ...DEFAULTS[x.kind], ...(db.exPrefs[x.id] || {}) };
 }
 
+// The gym clock: picking a day only plans it. The clock starts when Ben taps Start, logs cardio
+// (backdated by its minutes) or logs his first set.
+const clockOn = (s) => s.clock !== false;
+function startClock(s, t = Date.now()) {
+  if (!clockOn(s) || t < s.start) s.start = Math.min(t, Date.now());
+  s.clock = true;
+}
+
 function startSession(day, plan, customName) {
   const s = {
-    id: uid(), start: Date.now(), end: null, split: db.settings.split, day, customName,
+    id: uid(), start: Date.now(), clock: false, end: null, split: db.settings.split, day, customName,
     cardio: [], ex: plan.map((p) => ({ id: p.id, slot: p.slot, sets: [] })), bodyWeight: null,
   };
   db.sessions.push(s);
@@ -230,7 +238,7 @@ function sessionStats(s) {
   const cardioMin = s.cardio.reduce((a, c) => a + c.min, 0);
   const st = strengthStats(s);
   const end = s.end || Date.now();
-  return { cardio, cardioMin, strength: st, total: cardio + st.kcal, gymMin: Math.round((end - s.start) / 60000) };
+  return { cardio, cardioMin, strength: st, total: cardio + st.kcal, gymMin: clockOn(s) ? Math.round((end - s.start) / 60000) : 0 };
 }
 
 // ---------- Rest timer ----------
@@ -293,6 +301,7 @@ setInterval(tickTimer, 250);
 
 function addSet(e, x, st) {
   st.t = Date.now();
+  if (!clockOn(active())) startClock(active());
   e.sets.push(st);
   save();
   const prefs = prefsFor(x);
@@ -386,9 +395,9 @@ const views = {
         <button class="link" data-act="go" data-v="guide">How this works</button></div>
       ${s ? `
         <button class="card resume" data-act="go" data-v="session">
-          <div class="eyebrow">Workout in progress</div>
+          <div class="eyebrow">${clockOn(s) ? 'Workout in progress' : "Today's plan"}</div>
           <div class="h2">${esc(sessionDayName(s))}</div>
-          <div class="muted">Started ${fmtTime(s.start)} · ${fmtMin(sessionStats(s).gymMin)}</div>
+          <div class="muted">${clockOn(s) ? `Started ${fmtTime(s.start)} · ${fmtMin(sessionStats(s).gymMin)}` : 'Planned · clock not started'}</div>
           <div class="cta">Resume →</div>
         </button>` : `
         <div class="card up-next">
@@ -453,13 +462,22 @@ const views = {
     const s = active();
     if (!s) return views.home();
     const st = sessionStats(s);
-    return `${top(sessionDayName(s), `Started ${fmtTime(s.start)}`, `<button class="btn-sm accent" data-act="finish">Finish</button>`)}
+    const on = clockOn(s);
+    const hhmm = (t) => { const d = new Date(t); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+    return `${top(sessionDayName(s), on ? `Started ${fmtTime(s.start)}` : 'Clock not started', `<button class="btn-sm accent" data-act="finish">Finish</button>`)}
     <div class="page">
       <div class="stats3">
-        <div><b data-live="gymmin">${fmtMin(st.gymMin)}</b><span>in gym</span></div>
+        <button class="clock-box ${on ? '' : 'off'}" data-act="clock-panel"><b data-live="gymmin">${on ? fmtMin(st.gymMin) : 'Start'}</b><span>${on ? 'in gym ›' : 'tap at the gym'}</span></button>
         <div><b>${st.strength.sets}</b><span>sets</span></div>
         <div><b>${st.total}</b><span>kcal so far</span></div>
       </div>
+      ${cur().clockOpen || !on ? `<div class="card clock-panel">
+        ${on ? `${field('Started at', `<input type="time" data-k="clock-time" value="${hhmm(s.start)}">`)}
+          <div class="muted small">Change it if you started earlier or later. Logged cardio is always counted.</div>
+          <button class="btn-ghost full" data-act="finish">Finish workout</button>`
+        : `<button class="big" data-act="clock-start">Start the clock</button>
+          <div class="muted small">Tap when you walk into the gym. Logging cardio or your first set starts it too.</div>`}
+      </div>` : ''}
 
       <div class="section-h">Cardio</div>
       ${s.cardio.length ? s.cardio.map((c, i) => `
@@ -914,7 +932,7 @@ function live() {
 setInterval(() => {
   const el = root.querySelector('[data-live="gymmin"]');
   const s = active();
-  if (el && s) el.textContent = fmtMin(Math.round((Date.now() - s.start) / 60000));
+  if (el && s && clockOn(s)) el.textContent = fmtMin(sessionStats(s).gymMin);
 }, 15000);
 
 // ---------- Input handling ----------
@@ -964,7 +982,7 @@ function setValue(k, raw, el) {
 
 root.addEventListener('input', (e) => {
   const el = e.target.closest('[data-k]');
-  if (!el || el.type === 'file' || el.type === 'checkbox') return;
+  if (!el || el.type === 'file' || el.type === 'checkbox' || el.dataset.k === 'clock-time') return;
   setValue(el.dataset.k, el.value, el);
 });
 
@@ -973,6 +991,13 @@ root.addEventListener('change', async (e) => {
   if (!el) return;
   const k = el.dataset.k;
   if (el.type === 'checkbox') { setValue(k, el.checked, el); return; }
+  if (k === 'clock-time' && el.value) {
+    const s = active();
+    const [h, m] = el.value.split(':').map(Number);
+    const t = new Date(); t.setHours(h, m, 0, 0);
+    if (t > Date.now()) t.setDate(t.getDate() - 1);
+    s.start = t.getTime(); s.clock = true; save(); render(); return;
+  }
   if (k === 'photo' && el.files[0]) { cur().photo = await shrinkPhoto(el.files[0]); render(); return; }
   if (k === 'restore' && el.files[0]) { restore(el.files[0]); return; }
 });
@@ -1092,9 +1117,14 @@ const actions = {
   'cardio-save': () => {
     const d = cur().draft;
     if (!(d.min > 0)) { toast('Add minutes'); return; }
-    active().cardio.push({ ...d, t: Date.now() });
+    const s = active();
+    s.cardio.push({ ...d, t: Date.now() });
+    // The cardio happened before it was logged, so the gym clock reaches back at least that far.
+    startClock(s, Date.now() - s.cardio.reduce((a, c) => a + c.min, 0) * 60000);
     save(); back();
   },
+  'clock-panel': () => { cur().clockOpen = !cur().clockOpen; render(); },
+  'clock-start': () => { startClock(active()); cur().clockOpen = false; save(); render(); toast('Clock started'); },
   'cardio-del': (el) => { if (confirm('Remove this cardio?')) { active().cardio.splice(+el.dataset.v, 1); save(); render(); } },
 
   'open-ex': (el) => {
