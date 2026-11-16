@@ -69,6 +69,10 @@ export const EXERCISES = [
     'Seat so the handles sit at mid-chest. Press out without locking elbows hard, return slowly until you feel a stretch.'),
   X('pec_fly', 'Seated chest fly machine', 'chest', 'isolation', ['pecdeck'],
     'Seat so the vertical handles line up with your chest, elbows slightly bent. Squeeze the handles together, hold a second, open slowly.'),
+  X('cable_fly_low', 'High-to-low cable fly (lower chest)', 'chest', 'isolation', ['cable'],
+    'Both pulleys at the top, a D-handle in each hand, one step forward. Lean forward slightly, soft bend in the elbows. Sweep your hands down and together in front of your hips, squeeze, let them rise back slowly. The downward angle works the lower chest.'),
+  X('db_decline', 'Decline dumbbell press (lower chest)', 'chest', 'compound', ['dumbbells', 'bench'],
+    'Set the bench to a slight decline and hook your feet under the pads. Press the dumbbells up over your lower chest, lower slowly. Bench won\'t decline? Lie flat, lift your hips into a bridge and press from there.'),
   X('cable_fly', 'Cable chest fly', 'chest', 'isolation', ['cable'],
     'Pulleys at shoulder height, one step forward. Slight bend in the elbows, sweep your hands together in front of your chest like hugging a tree, open back slowly.'),
   X('db_fly', 'Dumbbell fly', 'chest', 'isolation', ['dumbbells', 'bench'],
@@ -261,7 +265,7 @@ export const SPLITS = {
     days: [
       { key: 'push', name: 'Push', sub: 'Chest · Shoulders · Triceps', slots: [
         S(['chest'], 'compound'), S(['shoulders'], 'compound'), S(['chest'], 'compound'),
-        S(['shoulders'], 'isolation'), S(['chest'], 'isolation'), S(['triceps'], 'isolation'), S(['abs'], 'core')] },
+        S(['shoulders'], 'isolation'), S(['chest'], 'isolation'), S(['chest'], 'isolation'), S(['triceps'], 'isolation'), S(['abs'], 'core')] },
       { key: 'pull', name: 'Pull', sub: 'Back · Biceps · Rear shoulders', slots: [
         S(['back'], 'compound'), S(['back'], 'compound'), S(['back'], 'isolation'),
         S(['reardelts'], 'isolation'), S(['reardelts'], 'isolation'), S(['biceps'], 'isolation'), S(['biceps'], 'isolation'), S(['abs'], 'core')] },

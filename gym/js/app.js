@@ -42,6 +42,14 @@ if (db.testWipe !== 1) {
   db.timer = null; db.lastPick = {}; db.exPrefs = {}; db.picks = {};
   db.testWipe = 1; save();
 }
+// Push day gained a lower-chest slot: add the high-to-low fly to what Ben already ticks for push.
+if (db.pushV !== 1) {
+  for (const store of [db.lastPick, db.dayPlans]) {
+    const ids = store['ppl.push'];
+    if (ids?.length && !ids.includes('cable_fly_low')) ids.push('cable_fly_low');
+  }
+  db.pushV = 1; save();
+}
 // Pull day changed (second rear-delt slot, both curls, straight-arm pulldown for the Smith row): start it fresh so the new picks show ticked.
 if (db.rearV !== 3) {
   delete db.lastPick['ppl.pull'];
@@ -188,7 +196,7 @@ function suggestion(x, prev, prefs) {
     return hitAll ? { text: `All ${prefs.sets} sets done last time. Try ${prefs.reps + 2} reps.`, reps: prefs.reps + 2 }
       : { text: `Aim for ${prefs.sets} × ${prefs.reps} today.` };
   }
-  const lastW = sets.at(-1).w;
+  const lastW = Math.max(...sets.map((s) => s.w || 0));
   if (hitAll) return { text: `You hit ${prefs.sets} × ${prefs.reps} last time. Try ${lastW + 5}.`, w: lastW + 5 };
   return { text: `Same weight as last time, aim for ${prefs.sets} × ${prefs.reps}.`, w: lastW };
 }
@@ -519,7 +527,7 @@ const views = {
         <div class="muted small">Uses: ${x.eq.map(eqName).map(esc).join(', ')}</div></details>
 
       ${prev ? `<div class="last"><span class="muted small">Last time · ${fmtDate(prev.session.start)}</span><div>${esc(setsSummary(x, prev.entry.sets))}</div>
-        ${sug ? `<div class="sug">${esc(sug.text)}</div>` : ''}</div>` : `<div class="last"><span class="muted small">First time doing this one.</span><div class="sug">${x.load === 'time' ? 'Start with a hold you can keep with good form, around 30 seconds. Stop when your hips sag.'
+        ${sug ? `<div class="sug">${esc(sug.text)}${!n && sug.w != null && sug.w !== d.w ? ` <button class="btn-sm accent" data-act="use-sug">Use ${sug.w}</button>` : ''}</div>` : ''}</div>` : `<div class="last"><span class="muted small">First time doing this one.</span><div class="sug">${x.load === 'time' ? 'Start with a hold you can keep with good form, around 30 seconds. Stop when your hips sag.'
           : x.load === 'body' ? `Aim for ${prefs.reps} clean reps. Make it easier or harder as the how-to says.`
           : `Pick a weight you can do ${prefs.reps} times with 2–3 reps left in the tank.`}</div></div>`}
 
@@ -851,10 +859,11 @@ function cardioDraft(type) {
   return { type, min: 15, effort: 'moderate' };
 }
 
+// Pre-fill: the set before this one today, else the weight Ben started on last time. A heavier suggestion is one tap away.
 function logDraft(x, e, prev, sug, prefs) {
-  const lastSet = e.sets.at(-1) || prev?.entry.sets.at(-1);
+  const lastSet = e.sets.at(-1) || prev?.entry.sets[0];
   return {
-    w: e.sets.length ? lastSet.w : sug?.w ?? lastSet?.w ?? (x.load === 'weight' ? null : 0),
+    w: lastSet ? lastSet.w : (x.load === 'weight' ? null : 0),
     bar: lastSet ? !!lastSet.bar : !!x.bar,
     reps: e.sets.length ? lastSet.reps : sug?.reps ?? prefs.reps,
     sec: e.sets.length ? lastSet.sec : sug?.sec ?? 30,
@@ -1048,6 +1057,12 @@ const actions = {
     finishHold(done);
   },
   'hold-cancel': () => { hold = null; render(); },
+  'use-sug': () => {
+    const c = cur();
+    const x = exById(active().ex[c.exIdx].id);
+    const sug = suggestion(x, lastTime(x.id, active()), prefsFor(x));
+    if (sug?.w != null) { c.draft.w = sug.w; render(); }
+  },
   info: (el) => {
     const box = root.querySelector(`[data-how="${el.dataset.v}"]`);
     box.hidden = !box.hidden;
