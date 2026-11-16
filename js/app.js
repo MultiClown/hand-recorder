@@ -32,7 +32,8 @@ function newSession() {
     id: uid(), createdAt: Date.now(), type: 'tournament',
     game: prev ? { ...prev.game } : { sb: 1000, bb: 2000, ante: 2000, anteType: 'bb' },
     maxSeats: prev?.maxSeats || 9,
-    heroSeat: null, seatNotes: {}, tableNo: 1, bullets: 1,
+    heroSeat: null, seatNotes: {}, tableNo: 1, bullets: 1, status: 'setup',
+    startStack: prev?.startStack ?? null,
     hands: [],
   };
   db.sessions.push(s);
@@ -187,34 +188,47 @@ function handSummary(h) {
 
 function homeView() {
   const s = session();
+  const status = statusOf(s);
   const dateOf = (x) => new Date(playedAt(x)).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const past = db.sessions.filter((x) => x.id !== s.id).reverse();
+  let body;
+  if (status === 'setup') body = startCard(s) + tableCard(s);
+  else if (status === 'finished') body = finishedCard(s) + handList(s);
+  else body = `${liveCard(s)}<button class="big" data-act="new-hand">+ New hand</button>${handList(s)}${tableCard(s)}`;
+  // Things for after the session sit at the bottom, out of the way while recording.
   return `<div class="home">
     <h1>Hand Recorder</h1>
-    ${tourneyCard(s, dateOf(s))}
-    <button class="big" data-act="new-hand">+ New hand</button>
-    ${s.hands.slice().reverse().map((h) => swipe('hand', h.id, handSummary(h))).join('')}
-    ${s.hands.length ? `<div class="row"><button class="secondary" style="flex:1" data-act="export-editor">Export for vlog editor</button>
-      <button class="secondary" style="flex:1" data-act="copy-all">Copy all as text</button></div>
-      <div class="hint">Swipe a hand or session left to delete it.</div>` : ''}
-    ${detailsCard(s)}
-    ${tableCard(s)}
-    ${past.length ? `<div class="muted" style="margin-top:8px">Past sessions</div>
-      ${past.map((p) => swipe('session', p.id, `<button class="hand-item" data-act="session" data-id="${p.id}">
-        <span>${esc(p.name || 'Tournament')} · ${dateOf(p)}</span>
-        <span class="muted">${p.hands.length} hands</span></button>`)).join('')}` : ''}
-    <div class="muted" style="margin-top:8px">Backup <span class="hint">· every session and hand, to move phones or keep safe</span></div>
-    <div class="row"><button class="secondary" style="flex:1" data-act="backup">Back up all</button>
-      <button class="secondary" style="flex:1" data-act="restore">Restore</button></div>
+    ${body}
+    <div class="after">
+      ${status !== 'setup' && status !== 'finished' && s.hands.length ? `<div class="muted">After the session</div>
+        <div class="row"><button class="secondary small-btn" style="flex:1" data-act="export-editor">Export for vlog editor</button>
+          <button class="secondary small-btn" style="flex:1" data-act="copy-all">Copy all as text</button></div>` : ''}
+      <div class="row between"><span class="muted">Tournaments</span><button class="btn-ghost" data-act="new-session">+ New tournament</button></div>
+      ${past.map((x) => swipe('session', x.id, `<button class="hand-item" data-act="session" data-id="${x.id}">
+        <span>${esc(x.name || 'Tournament')} · ${dateOf(x)}</span>
+        <span class="muted">${statusOf(x) === 'finished' ? 'finished · ' : ''}${x.hands.length} hands</span></button>`)).join('')}
+      <div class="row"><button class="btn-ghost" style="flex:1" data-act="backup">Back up all</button>
+        <button class="btn-ghost" style="flex:1" data-act="restore">Restore</button></div>
+    </div>
     <input type="file" id="restore-file" accept=".json,application/json" hidden>
   </div>
   ${ui.sheet ? homeSheet(s) : ''}`;
 }
 
+const handList = (s) => `${s.hands.slice().reverse().map((h) => swipe('hand', h.id, handSummary(h))).join('')}
+  ${s.hands.length ? '<div class="hint">Swipe a hand left to delete it.</div>' : ''}`;
+
 // A tournament is dated by when its first hand was played, not when it was set up.
 const playedAt = (s) => (s.hands[0] ? s.hands[0].createdAt : s.createdAt);
 
-const NEEDED = [['name', 'name'], ['buyin', 'buy-in'], ['gtd', 'GTD'], ['entries', 'entries'], ['itm', 'ITM places']];
+// Where the tournament is: setup → late reg → reg closed → in the money → finished.
+const STAGES = [['latereg', 'Late reg'], ['regclosed', 'Reg closed'], ['itm', 'ITM']];
+const statusOf = (s) => s.status || (s.hands.length || s.name ? 'latereg' : 'setup');
+const pastReg = (s) => ['regclosed', 'itm', 'finished'].includes(statusOf(s));
+
+// Details the vlog needs; the field size only once registration has closed.
+const needed = (s) => [['name', 'name'], ['buyin', 'buy-in'], ['gtd', 'GTD'],
+  ...(pastReg(s) ? [['entries', 'entries'], ['itm', 'ITM places']] : [])];
 
 function tableCard(s) {
   const n = s.maxSeats || 9;
@@ -231,13 +245,17 @@ function tableCard(s) {
     <div class="row between"><span class="label">Table${(s.tableNo || 1) > 1 ? ` #${s.tableNo}` : ''}</span>
       <div class="seg" style="flex:none">${[6, 8, 9, 10].map((m) => `<button class="${n === m ? 'on' : ''}" data-act="t-size" data-n="${m}">${m}-max</button>`).join('')}</div></div>
     <div class="mini-table"><div class="felt"></div><span class="dealer-spot">Dealer</span>${seats}</div>
-    <div class="hint">${s.heroSeat ? 'Tap a seat for a note and a stack. New hands pick both up.' : 'Tap your seat, then "This is my seat".'}</div>
-    <button class="secondary" data-act="new-table">${ui.confirmNewTable ? 'Tap again to clear this table' : 'Moved to a new table'}</button>
+    <div class="row"><button class="primary" style="flex:1" data-act="table-all">Enter all seats</button>
+      <button class="secondary" style="flex:1" data-act="new-table">${ui.confirmNewTable ? 'Tap again to clear' : 'Moved tables'}</button></div>
+    <div class="hint">${s.heroSeat ? 'Tap one seat, or enter all seats on one screen. New hands pick up notes and stacks.' : 'Tap your seat, then "This is my seat" (or use Enter all seats).'}</div>
   </div>`;
 }
 
 function homeSheet(s) {
   const sh = ui.sheet;
+  const unit = stackUnit();
+  const unitLabel = STACK_UNITS.find(([u]) => u === unit)[1];
+  const stackVal = (v) => (v > 0 ? +(v / unit).toFixed(2) : '');
   if (sh.type === 'seatnote') {
     return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
       <h3>Seat ${sh.k}</h3>
@@ -245,11 +263,49 @@ function homeSheet(s) {
         <button class="secondary ${s.seatEmpty?.[sh.k] ? 'on-empty' : ''}" style="flex:1" data-act="seat-empty" data-k="${sh.k}">${s.seatEmpty?.[sh.k] ? 'Empty · tap to fill' : 'Mark seat empty'}</button></div>`}
       ${s.heroSeat === sh.k ? '' : `<label class="muted">Note about the player here</label>
       <input data-input="seat-note" data-k="${sh.k}" placeholder="e.g. hat guy, aggro reg" value="${esc(s.seatNotes?.[sh.k] || '')}">`}
-      <label class="muted">Stack <span class="hint">in ${STACK_UNITS.find(([u]) => u === stackUnit())[1]} · a rough number is fine</span></label>
+      <label class="muted">Stack <span class="hint">in ${unitLabel} · a rough number is fine</span></label>
       ${s.heroSeat === sh.k
-        ? `<input data-input="t-stack" inputmode="decimal" placeholder="your stack" value="${s.myStack != null ? +(s.myStack / stackUnit()).toFixed(2) : ''}">`
-        : `<input data-input="seat-stack" data-k="${sh.k}" inputmode="decimal" placeholder="e.g. 45" value="${s.seatStacks?.[sh.k] > 0 ? +(s.seatStacks[sh.k] / stackUnit()).toFixed(2) : ''}">`}
+        ? `<input data-input="t-stack" inputmode="decimal" placeholder="your stack" value="${stackVal(s.myStack)}">`
+        : `<input data-input="seat-stack" data-k="${sh.k}" inputmode="decimal" placeholder="e.g. 45" value="${stackVal(s.seatStacks?.[sh.k])}">`}
       <button class="primary" data-act="close-sheet">Done</button></div></div>`;
+  }
+  if (sh.type === 'tableall') {
+    // Every seat on one screen: tap a number to make it your seat, then fill notes and stacks.
+    const n = s.maxSeats || 9;
+    let rows = '';
+    for (let k = 1; k <= n; k++) {
+      const me = s.heroSeat === k;
+      const empty = !me && s.seatEmpty?.[k];
+      rows += `<div class="ta-row ${empty ? 'empty' : ''} ${me ? 'me' : ''}">
+        <button class="ta-k" data-act="my-seat" data-k="${k}">${me ? 'ME' : k}</button>
+        ${me ? '<span class="ta-note muted">your seat</span>' : `<input class="ta-note" data-input="seat-note" data-k="${k}" placeholder="note" value="${esc(s.seatNotes?.[k] || '')}" ${empty ? 'disabled' : ''}>`}
+        ${me ? `<input class="ta-stack" data-input="t-stack" inputmode="decimal" placeholder="stack" value="${stackVal(s.myStack)}">`
+          : `<input class="ta-stack" data-input="seat-stack" data-k="${k}" inputmode="decimal" placeholder="stack" value="${stackVal(s.seatStacks?.[k])}" ${empty ? 'disabled' : ''}>`}
+        ${me ? '<span class="ta-empty"></span>' : `<button class="ta-empty ${empty ? 'on' : ''}" data-act="seat-empty" data-k="${k}">${empty ? 'empty' : '—'}</button>`}
+      </div>`;
+    }
+    return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <div class="row between"><h3>Table${(s.tableNo || 1) > 1 ? ` #${s.tableNo}` : ''}</h3><span class="hint">stacks in ${unitLabel} · tap a number for your seat</span></div>
+      ${rows}
+      <button class="primary" data-act="close-sheet">Done</button></div></div>`;
+  }
+  if (sh.type === 'details') {
+    return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <h3>Tournament details</h3>
+      <input class="tname" data-input="t-name" placeholder="Tournament name" value="${esc(s.name || '')}">
+      <div class="tgrid3">${tField(s, 'buyin', 'Buy-in', '$400')}${tField(s, 'gtd', 'GTD', '$500K')}
+        <label class="tf"><span>Starting stack</span><input data-input="t-startstack" inputmode="decimal" placeholder="in ${unitLabel}" value="${stackVal(s.startStack)}"></label></div>
+      <div class="tgrid3">${timeField(s, 'start', 'Started')}${statusOf(s) === 'finished' ? timeField(s, 'bust', 'Busted') : '<span></span>'}<span></span></div>
+      <button class="danger small" data-act="delete-session">${ui.confirmDeleteSession ? 'Tap again to delete this tournament' : 'Delete tournament'}</button>
+      <button class="primary" data-act="close-sheet">Done</button></div></div>`;
+  }
+  if (sh.type === 'finish') {
+    return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
+      <h3>Tournament over</h3>
+      <div class="tgrid3">${tField(s, 'finish', 'Finish place', '—', 'numeric')}${tField(s, 'cashout', 'Cash-out', '$0')}${timeField(s, 'bust', 'Busted')}</div>
+      ${!s.entries || !s.itm ? `<div class="tgrid3">${tField(s, 'entries', 'Entries', '212', 'numeric', true)}${tField(s, 'itm', 'ITM places', '60', 'numeric', true)}<span></span></div>` : ''}
+      <div class="row"><button class="secondary" style="flex:1" data-act="finish-cancel">Not yet</button>
+        <button class="primary" style="flex:2" data-act="finish-confirm">Finish tournament</button></div></div></div>`;
   }
   if (sh.type === 'exportwarn') {
     return `<div class="overlay" data-act="close-sheet"><div class="sheet" data-stop>
@@ -296,48 +352,63 @@ async function restore(file) {
   toast(`Restored ${incoming.length} session${incoming.length === 1 ? '' : 's'}${added < incoming.length ? ` (${incoming.length - added} updated)` : ''}`);
 }
 
-// The live tournament: details, field size, and the blinds/stack that new hands start from.
-function tourneyCard(s, when) {
-  // Fields the vlog needs are outlined until filled in.
-  const f = (...a) => tField(s, ...a);
-  return `<div class="card tcard">
-    <div class="row between"><input class="tname need ${s.name ? '' : 'missing'}" data-input="t-name" placeholder="Tournament name" value="${esc(s.name || '')}">
-      <button class="btn-ghost" data-act="new-session">New</button></div>
-    <div class="muted">${when} · ${s.hands.length} hands</div>
-    <div class="tgrid3">
-      <label class="tf"><span>SB</span><input data-input="t-sb" inputmode="decimal" value="${F(s.game.sb)}"></label>
-      <label class="tf"><span>BB <span class="muted">+ BB ante</span></span><input data-input="t-bb" inputmode="decimal" value="${F(s.game.bb)}"></label>
-      <label class="tf"><span>My stack</span><input data-input="t-stack" inputmode="decimal" placeholder="in ${STACK_UNITS.find(([u]) => u === (s.stackUnit || 1e3))[1]}" value="${s.myStack != null ? +(s.myStack / (s.stackUnit || 1e3)).toFixed(2) : ''}"></label>
-    </div>
-    <div class="tgrid3">${f('left', 'Players left', '44', 'numeric')}<span></span><span></span></div>
-    <div class="hint" id="t-eq">${s.myStack != null ? `My stack = ${F(s.myStack)} (${(s.myStack / s.game.bb).toFixed(1)} BB)` : 'New hands start with these blinds and your stack.'}</div>
-    ${missingNote(s)}
-  </div>`;
-}
-
 const tField = (s, key, label, ph, mode = 'text', need = false) => `<label class="tf ${need ? 'need' : ''} ${need && !s[key] ? 'missing' : ''}"><span>${label}</span>
     <input data-input="t-${key}" inputmode="${mode}" placeholder="${ph}" value="${esc(s[key] ?? '')}"></label>`;
 
-function missingNote(s) {
-  const missing = NEEDED.filter(([k]) => !String(s[k] ?? '').trim()).map(([, l]) => l);
-  return missing.length ? `<div class="hint need-note">Still to fill in below: ${missing.join(', ')}</div>` : '';
+const timeField = (s, key, label) => `<div class="tf"><span>${label} <button class="now" data-act="time-now" data-k="${key}">now</button></span>
+    <input type="time" data-input="t-${key}" value="${esc(s[key] || '')}"></div>`;
+
+const blindFields = (s) => `
+  <label class="tf"><span>SB</span><input data-input="t-sb" inputmode="decimal" value="${F(s.game.sb)}"></label>
+  <label class="tf"><span>BB <span class="muted">+ BB ante</span></span><input data-input="t-bb" inputmode="decimal" value="${F(s.game.bb)}"></label>`;
+
+const stackField = (s, key, label, value) => `<label class="tf"><span>${label}</span><input data-input="t-${key}" inputmode="decimal"
+  placeholder="in ${STACK_UNITS.find(([u]) => u === stackUnit())[1]}" value="${value > 0 ? +(value / stackUnit()).toFixed(2) : ''}"></label>`;
+
+// Step 1: enter the tournament once, then start it (which records the start time).
+function startCard(s) {
+  return `<div class="card tcard">
+    <div class="label">New tournament</div>
+    <input class="tname need ${s.name ? '' : 'missing'}" data-input="t-name" placeholder="Tournament name" value="${esc(s.name || '')}">
+    <div class="tgrid3">${tField(s, 'buyin', 'Buy-in', '$400', 'text', true)}${tField(s, 'gtd', 'GTD', '$500K', 'text', true)}${stackField(s, 'startstack', 'Starting stack', s.startStack)}</div>
+    <div class="tgrid3">${blindFields(s)}<span></span></div>
+    <button class="big" data-act="start-tourney">Start tournament</button>
+    <div class="hint">Starting records the start time. Your seat and the table can be set now or after.</div>
+  </div>`;
 }
 
-// Tournament details and my result: filled in once, or at the end.
-function detailsCard(s) {
-  const f = (...a) => tField(s, ...a);
-  const time = (key, label) => `<div class="tf"><span>${label} <button class="now" data-act="time-now" data-k="${key}">now</button></span>
-    <input type="time" data-input="t-${key}" value="${esc(s[key] || '')}"></div>`;
+const tourneyHeader = (s) => {
+  const meta = [s.buyin, s.gtd && `${s.gtd} GTD`, s.start && `started ${s.start}`, `bullet #${Number(s.bullets) || 1}`].filter(Boolean).join(' · ');
+  return `<div class="row between"><div><b class="tt">${esc(s.name || 'Tournament')}</b><div class="muted">${esc(meta)}</div></div>
+    <button class="btn-ghost" data-act="edit-details">Edit</button></div>`;
+};
+
+// Step 2: the running tournament. Field-size details appear once late reg has ended.
+function liveCard(s) {
+  const status = statusOf(s);
   return `<div class="card tcard">
-    <div class="label">Tournament details</div>
-    <div class="tgrid3">${f('buyin', 'Buy-in', '$400', 'text', true)}${f('gtd', 'GTD', '$500K', 'text', true)}${f('itm', 'ITM places', '60', 'numeric', true)}</div>
-    <div class="tgrid3">${f('entries', 'Entries', '212', 'numeric', true)}<span></span><span></span></div>
-    <div class="label">My result</div>
-    <div class="tgrid3">
-      <div class="tf"><span>Bullets</span><div class="stepper"><button data-act="bullets" data-d="-1">−</button><b>${Number(s.bullets) || 1}</b><button data-act="bullets" data-d="1">+</button></div></div>
-      ${f('finish', 'Finish place', '—', 'numeric')}${f('cashout', 'Cash-out', '$0')}</div>
-    <div class="tgrid3">${time('start', 'Start')}${time('bust', 'Bust')}<span></span></div>
-    <button class="danger small" data-act="delete-session">${ui.confirmDeleteSession ? 'Tap again to delete this tournament' : 'Delete tournament'}</button>
+    ${tourneyHeader(s)}
+    <div class="seg tracker">${STAGES.map(([k, l]) => `<button class="${status === k ? 'on' : ''}" data-act="t-status" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="tgrid3">${blindFields(s)}${stackField(s, 'stack', 'My stack', s.myStack)}</div>
+    ${pastReg(s) ? `<div class="tgrid3">${tField(s, 'entries', 'Entries', '212', 'numeric', true)}${tField(s, 'left', 'Players left', '44', 'numeric')}${tField(s, 'itm', 'ITM places', '60', 'numeric', true)}</div>` : ''}
+    <div class="hint" id="t-eq">${s.myStack != null ? `My stack = ${F(s.myStack)} (${(s.myStack / s.game.bb).toFixed(1)} BB)` : 'New hands start with these blinds and your stack.'}</div>
+    <div class="row">
+      ${status === 'latereg' ? `<button class="secondary" style="flex:1" data-act="rebuy">${ui.confirmRebuy ? 'Tap again: new bullet, new table' : `Rebuy (bullet #${(Number(s.bullets) || 1) + 1})`}</button>` : ''}
+      <button class="secondary" style="flex:1" data-act="im-out">I'm out</button></div>
+  </div>`;
+}
+
+// Step 3: finished. Result up front, with the export that comes after a session.
+function finishedCard(s) {
+  return `<div class="card tcard done">
+    ${tourneyHeader(s)}
+    <div class="label">Finished${s.bust ? ` at ${s.bust}` : ''}</div>
+    <div class="tgrid3">${tField(s, 'finish', 'Finish place', '—', 'numeric')}${tField(s, 'cashout', 'Cash-out', '$0')}
+      <div class="tf"><span>Bullets</span><div class="stepper"><button data-act="bullets" data-d="-1">−</button><b>${Number(s.bullets) || 1}</b><button data-act="bullets" data-d="1">+</button></div></div></div>
+    <div class="tgrid3">${tField(s, 'entries', 'Entries', '212', 'numeric', true)}${tField(s, 'itm', 'ITM places', '60', 'numeric', true)}${timeField(s, 'bust', 'Busted')}</div>
+    ${s.hands.length ? `<div class="row"><button class="primary" style="flex:2" data-act="export-editor">Export for vlog editor</button>
+      <button class="secondary" style="flex:1" data-act="copy-all">Copy all</button></div>` : ''}
+    <button class="btn-ghost" data-act="reopen">Reopen tournament</button>
   </div>`;
 }
 
@@ -486,7 +557,7 @@ function editorHand(h) {
 
 function exportForEditor() {
   const s = session();
-  const missing = NEEDED.filter(([k]) => !String(s[k] ?? '').trim()).map(([, l]) => l);
+  const missing = needed(s).filter(([k]) => !String(s[k] ?? '').trim()).map(([, l]) => l);
   if (missing.length && !ui.exportAnyway) { ui.sheet = { type: 'exportwarn', missing }; return render(); }
   ui.exportAnyway = false;
   const day = new Date(playedAt(s)).toLocaleDateString('en-CA');
@@ -501,6 +572,7 @@ function exportForEditor() {
     _source: `Hand Recorder app export (${new Date().toISOString().slice(0, 16).replace('T', ' ')})`,
     tournament: {
       name: s.name || '', buyin: s.buyin || '', gtd: s.gtd || '', date: day,
+      status: statusOf(s), starting_stack: s.startStack || null,
       entries: num(s.entries), itm: num(s.itm), players_left: num(s.left),
       result: {
         bullets: Number(s.bullets) || 1, finish: num(s.finish), cashout: s.cashout || null,
@@ -983,6 +1055,37 @@ const handlers = {
     ui.sessionId = null; ui.confirmDeleteSession = false;
     save(); toast('Tournament deleted');
   },
+  'start-tourney'() {
+    const s = session();
+    s.status = 'latereg';
+    s.start = s.start || new Date().toTimeString().slice(0, 5);
+    if (s.myStack == null && s.startStack > 0) s.myStack = s.startStack;
+    save(); render(); toTop();
+  },
+  't-status'(el) { session().status = el.dataset.v; save(); render(); },
+  'edit-details'() { ui.sheet = { type: 'details' }; render(); },
+  'table-all'() { ui.sheet = { type: 'tableall' }; render(); },
+  rebuy() {
+    if (!ui.confirmRebuy) { ui.confirmRebuy = true; return render(); }
+    // A new bullet means a new seat: clear the old table and start from the starting stack.
+    const s = session();
+    s.bullets = (Number(s.bullets) || 1) + 1;
+    s.tableNo = (s.tableNo || 1) + 1;
+    s.seatNotes = {}; s.seatStacks = {}; s.seatEmpty = {}; s.heroSeat = null;
+    if (s.startStack > 0) s.myStack = s.startStack;
+    ui.confirmRebuy = false;
+    save();
+    toast(`Bullet #${s.bullets}: pick your new seat`);
+  },
+  'im-out'() {
+    const s = session();
+    ui.sheet = { type: 'finish', autoBust: !s.bust };
+    if (!s.bust) s.bust = new Date().toTimeString().slice(0, 5);
+    save(); render();
+  },
+  'finish-cancel'() { const s = session(); if (ui.sheet?.autoBust) s.bust = ''; ui.sheet = null; save(); render(); },
+  'finish-confirm'() { session().status = 'finished'; ui.sheet = null; save(); render(); toTop(); },
+  reopen() { const s = session(); s.status = s.left || s.entries ? 'regclosed' : 'latereg'; save(); render(); },
   'export-anyway'() { ui.sheet = null; ui.exportAnyway = true; exportForEditor(); },
   'stacks-edit'() { ui.stackEdit = !ui.stackEdit; ui.raise = null; render(); },
   'stack-unit'(el) { session().stackUnit = Number(el.dataset.u); save(); render(); },
@@ -1168,6 +1271,7 @@ root.addEventListener('click', (e) => {
   if (el.dataset.act !== 'delete-hand') ui.confirmDelete = false;
   if (el.dataset.act !== 'delete-session') ui.confirmDeleteSession = false;
   if (el.dataset.act !== 'new-table') ui.confirmNewTable = false;
+  if (el.dataset.act !== 'rebuy') ui.confirmRebuy = false;
   handlers[el.dataset.act]?.(el, e);
 });
 
@@ -1191,6 +1295,7 @@ root.addEventListener('input', (e) => {
       s.game.anteType = 'bb';
       s.game.ante = s.game.bb;
     } else if (k === 'stack') s.myStack = parseStack(v);
+    else if (k === 'startstack') s.startStack = parseStack(v);
     else {
       s[k] = v;
       const box = e.target.closest('.need');

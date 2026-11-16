@@ -27,6 +27,12 @@ Web app (PWA later) for recording live poker hands. Prototype on desktop first, 
 - [x] Stacks from all-ins: "All-in" switch on Raise and "Call all-in for less" work out the exact stack; covering opponents get hero's stack as a one-tap estimate; saved hands with blank stacks show "missing stacks" + Add stacks shortcut; export stack_source / stack_at_least
 - [x] Seat stacks on the home table (tap a seat: note + stack); new hands pick them up; saved hands write opponents' end stacks back; numbers always shown as 1,000 (switch removed); empty seats set on the home table (synced with "away" in Setup); "Me at bottom" toggle removed
 
+## Offline test feedback (2026-11-16)
+- [x] Tournament lifecycle: start form (name, buy-in, GTD, starting stack, blinds) → Start tournament (records start time) → live header + status tracker (Late reg / Reg closed / ITM); entries, players left, ITM only after late reg
+- [x] Rebuy (late reg): bullet +1, clears the table, stack back to starting stack; I'm out: bust time stamped, finish/cash-out/entries/ITM, then finished view with export up front; Reopen
+- [x] Enter all seats: one screen with every seat (tap number = my seat, note, stack, empty)
+- [x] Export / copy / backup moved to the bottom; export warning follows the stage; export has status + starting_stack
+
 ## Phase 2 (after feedback)
 - Iterate on the flow based on desktop testing
 - Drag an action onto a different seat

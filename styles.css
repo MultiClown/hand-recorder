@@ -352,3 +352,20 @@ textarea.note { min-height: 40px; }
 .tseat.empty { background: transparent; border-style: dashed; opacity: .55; }
 .tseat.empty span { color: var(--dim); }
 .secondary.on-empty { background: #4a2330; color: #ffb4c0; }
+
+/* Tournament lifecycle */
+.tt { font-size: 17px; }
+.tracker button { padding: 8px 4px; }
+.tracker button.on { background: var(--brand-grad); color: #0f0d17; font-weight: 700; }
+.tcard.done { border-color: var(--brand); }
+.after { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.small-btn { padding: 9px; font-size: 13px; }
+
+/* All seats on one screen */
+.ta-row { display: grid; grid-template-columns: 40px 1fr 64px 52px; gap: 6px; align-items: center; }
+.ta-row input { padding: 7px 8px; min-width: 0; }
+.ta-k { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 0; font-weight: 700; }
+.ta-row.me .ta-k { background: var(--brand-grad); color: #0f0d17; border: 0; }
+.ta-row.empty input { opacity: .35; }
+.ta-empty { background: var(--panel2); border-radius: 8px; padding: 7px 0; font-size: 12px; color: var(--dim); }
+.ta-empty.on { background: #4a2330; color: #ffb4c0; }
